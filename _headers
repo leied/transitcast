@@ -1,0 +1,13 @@
+# The page opts into cross-origin isolation (see src/hooks.server.ts) so
+# SharedArrayBuffer exists and Kokoro can run multi-threaded. An isolated
+# document is only allowed to start a dedicated worker whose *script response*
+# carries a compatible COEP header — otherwise Chrome refuses it with a bare,
+# message-less error event, which is what the app was showing as "Kokoro
+# worker crashed". Static assets never pass through hooks, so the header for
+# the worker chunks has to come from here.
+#
+# The path must not be /_app/* — adapter-cloudflare appends its own /_app/*
+# block below and a duplicate path silently loses this header (verified with
+# wrangler dev).
+/_app/immutable/workers/*
+  Cross-Origin-Embedder-Policy: credentialless

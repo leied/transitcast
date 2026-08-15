@@ -10,6 +10,10 @@ import type { Handle } from '@sveltejs/kit';
  * files without a Cross-Origin-Resource-Policy header, so require-corp would
  * block the download outright. credentialless drops credentials instead of
  * demanding CORP, which suits anonymous CDN fetches exactly.
+ *
+ * This only covers HTML. The Kokoro worker's own script must carry the same
+ * header or an isolated page refuses to start it — that lives in /_headers,
+ * because static assets are served without ever reaching this hook.
  */
 export const handle: Handle = async ({ event, resolve }) => {
 	const response = await resolve(event);

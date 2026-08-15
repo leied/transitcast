@@ -123,7 +123,12 @@ async function explainWorkerError(e: ErrorEvent): Promise<Error> {
 	} catch {
 		return new Error('The speech engine could not start — the network dropped while loading it. Check the connection and try again.');
 	}
-	return new Error('Kokoro worker crashed (no details from the browser). Reload the page and try again.');
+	// A bare error event with the build still present means the browser refused
+	// to start the worker — the known cause was the worker script being served
+	// without a COEP header on a cross-origin-isolated page (see /_headers).
+	return new Error(
+		'The browser refused to start the speech engine (no details given). Reload the page; if it keeps happening, say which browser this is.'
+	);
 }
 
 function ensureWorker(): Worker {
