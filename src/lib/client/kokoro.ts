@@ -7,6 +7,8 @@
  * while am_adam is an F+. Worth showing, because picking blind from a list of
  * 50 is how you end up with a voice that sounds broken.
  */
+import { sanitizeForSpeech } from '$lib/tts-text';
+
 export type KokoroVoice = {
 	id: string;
 	name: string;
@@ -51,26 +53,10 @@ export const KOKORO_VOICES: KokoroVoice[] = [
 	{ id: 'bm_lewis', name: 'Lewis', group: 'British English', gender: 'M', grade: 'D+' },
 	{ id: 'bm_daniel', name: 'Daniel', group: 'British English', gender: 'M', grade: 'D' },
 
-	// Other languages. The brief itself is written in English, so these only make
-	// sense alongside a section prompt that asks for another language.
-	{ id: 'ff_siwis', name: 'Siwis', group: 'French', gender: 'F', grade: 'B-' },
-	{ id: 'jf_alpha', name: 'Alpha', group: 'Japanese', gender: 'F', grade: 'C+' },
-	{ id: 'jf_gongitsune', name: 'Gongitsune', group: 'Japanese', gender: 'F', grade: 'C' },
-	{ id: 'jf_tebukuro', name: 'Tebukuro', group: 'Japanese', gender: 'F', grade: 'C' },
-	{ id: 'jf_nezumi', name: 'Nezumi', group: 'Japanese', gender: 'F', grade: 'C-' },
-	{ id: 'jm_kumo', name: 'Kumo', group: 'Japanese', gender: 'M', grade: 'C-' },
-	{ id: 'hf_alpha', name: 'Alpha', group: 'Hindi', gender: 'F', grade: 'C' },
-	{ id: 'hf_beta', name: 'Beta', group: 'Hindi', gender: 'F', grade: 'C' },
-	{ id: 'hm_omega', name: 'Omega', group: 'Hindi', gender: 'M', grade: 'C' },
-	{ id: 'hm_psi', name: 'Psi', group: 'Hindi', gender: 'M', grade: 'C' },
-	{ id: 'if_sara', name: 'Sara', group: 'Italian', gender: 'F', grade: 'C' },
-	{ id: 'im_nicola', name: 'Nicola', group: 'Italian', gender: 'M', grade: 'C' },
-	{ id: 'ef_dora', name: 'Dora', group: 'Spanish', gender: 'F', grade: '—' },
-	{ id: 'em_alex', name: 'Alex', group: 'Spanish', gender: 'M', grade: '—' },
-	{ id: 'pf_dora', name: 'Dora', group: 'Brazilian Portuguese', gender: 'F', grade: '—' },
-	{ id: 'pm_alex', name: 'Alex', group: 'Brazilian Portuguese', gender: 'M', grade: '—' },
-	{ id: 'zf_xiaoxiao', name: 'Xiaoxiao', group: 'Mandarin Chinese', gender: 'F', grade: 'D' },
-	{ id: 'zm_yunyang', name: 'Yunyang', group: 'Mandarin Chinese', gender: 'M', grade: 'D' }
+	// Only these 28 exist in kokoro-js. The Hugging Face repo ships voice files
+	// for French, Japanese, Hindi, Italian, Spanish, Portuguese and Mandarin too,
+	// but the library's voice table doesn't list them and generate() throws
+	// "Voice not found" — listing them from the repo's file names was a mistake.
 ];
 
 export const VOICE_GROUPS = [...new Set(KOKORO_VOICES.map((v) => v.group))];
@@ -83,7 +69,7 @@ export function voicesIn(group: string): KokoroVoice[] {
 }
 
 export function voiceLabel(v: KokoroVoice): string {
-	const bits = [`${v.name} (${v.gender})`, v.grade === '—' ? 'ungraded' : `grade ${v.grade}`];
+	const bits = [`${v.name} (${v.gender})`, `grade ${v.grade}`];
 	if (v.note) bits.push(v.note);
 	return bits.join(' · ');
 }
@@ -179,7 +165,8 @@ export const SAMPLE_TEXT =
 
 /** Renders a short sample so a voice can be judged before committing to it. */
 export async function previewVoice(voice: string, dtype?: string): Promise<Blob> {
-	const { pcm, rate } = await generateKokoro(SAMPLE_TEXT, voice, dtype);
+	// Same treatment the brief gets, so the audition matches the real thing.
+	const { pcm, rate } = await generateKokoro(sanitizeForSpeech(SAMPLE_TEXT), voice, dtype);
 	return encodeWav([pcm], rate);
 }
 
