@@ -497,18 +497,18 @@
 						<div style="margin-top: 0.75rem">
 							<label for="mode">Rendering</label>
 							<select id="mode" bind:value={config.tts.kokoroMode} onchange={touch}>
-								<option value="">Automatic — WebGPU if available</option>
-								<option value="webgpu-fp32">WebGPU · fp32 — fastest, 326MB</option>
-								<option value="webgpu-q4f16">WebGPU · q4f16 — faster, 154MB</option>
-								<option value="wasm-q8">CPU · q8 — slowest, most reliable, 92MB</option>
-								<option value="wasm-fp32">CPU · fp32 — slow, 326MB</option>
+								<option value="">Automatic — CPU, correct everywhere</option>
+								<option value="webgpu-fp32">WebGPU · fp32 — much faster, broken on some GPUs</option>
+								<option value="webgpu-q4f16">WebGPU · q4f16 — faster, 154MB, often silent</option>
+								<option value="wasm-q8">CPU · q8 — reliable, 92MB</option>
+								<option value="wasm-fp32">CPU · fp32 — reliable, best quality, 326MB</option>
 							</select>
 							<p class="tiny muted" style="margin: 0.35rem 0 0">
-								Backend and precision are one setting because they have to agree. <strong
-									>If the voice sounds fine at the start and degrades later, pick CPU · q8</strong
-								> — some devices lose accuracy through long utterances on the WebGPU backend, which
-								shows up as the back half going quiet and mushy. CPU is several times slower but
-								matches the reference output.
+								Backend and precision are one setting because they have to agree. CPU is the
+								default because it is correct everywhere; WebGPU is several times faster but
+								<strong>produces broken audio on some GPUs</strong> — on Intel Xe-LPG it renders
+								the back half of every clip quiet and mushy, and q4f16 comes out silent. Try
+								WebGPU if you want the speed, and switch back if it sounds wrong.
 							</p>
 						</div>
 

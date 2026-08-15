@@ -45,7 +45,12 @@ function resolveMode(mode: string | undefined, canWebGPU: boolean): { device: De
 		case 'wasm-fp32':
 			return { device: 'wasm', dtype: 'fp32' };
 		default:
-			return canWebGPU ? { device: 'webgpu', dtype: 'fp32' } : { device: 'wasm', dtype: 'q8' };
+			// WASM by default even when WebGPU is available. On an Intel Xe-LPG
+			// adapter the WebGPU backend scored 0.407 back/front (reference 0.99)
+			// at fp32 and produced pure silence at q4f16, while both WASM paths
+			// were clean. There's no way to detect a bad adapter up front, so the
+			// automatic choice is the one that is correct everywhere.
+			return { device: 'wasm', dtype: 'q8' };
 	}
 }
 
@@ -54,8 +59,9 @@ function load(mode?: string) {
 		// Asking for the adapter is the real test — navigator.gpu exists on plenty
 		// of mobile browsers that then refuse to hand one over.
 		const { device, dtype } = resolveMode(mode, await hasWebGPU());
+		const threads = self.crossOriginIsolated ? 'multi' : 'single';
 
-		self.postMessage({ type: 'status', device, dtype });
+		self.postMessage({ type: 'status', device, dtype, threads });
 
 		const tts = await KokoroTTS.from_pretrained(MODEL_ID, {
 			dtype,
