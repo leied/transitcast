@@ -1,6 +1,9 @@
 allowBuilds:
   esbuild: true
-  onnxruntime-node: set this to true or false
-  protobufjs: set this to true or false
-  sharp: set this to true or false
   workerd: true
+  # Node-only dependencies of @huggingface/transformers, pulled in by kokoro-js.
+  # Kokoro runs in the browser via WASM/WebGPU, so none of these ever execute —
+  # skipping their builds avoids compiling native binaries we don't use.
+  onnxruntime-node: false
+  protobufjs: false
+  sharp: false
