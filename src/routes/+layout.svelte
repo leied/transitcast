@@ -2,8 +2,18 @@
 	import '../app.css';
 	import favicon from '$lib/assets/favicon.svg';
 	import { page } from '$app/state';
+	import { BUILD, commitUrl } from '$lib/build';
 
 	let { children } = $props();
+
+	const built = BUILD.builtAt
+		? new Date(BUILD.builtAt).toLocaleString(undefined, {
+				month: 'short',
+				day: 'numeric',
+				hour: '2-digit',
+				minute: '2-digit'
+			})
+		: '';
 
 	const tabs = [
 		{ href: '/', label: 'Listen' },
@@ -30,7 +40,40 @@
 
 {@render children()}
 
+<footer>
+	<!-- Which commit is actually live. Cheap to add, and it settles the
+	     "is my fix deployed yet?" question that costs real time otherwise. -->
+	{#if commitUrl()}
+		<a href={commitUrl()} target="_blank" rel="noreferrer noopener">{BUILD.commit}</a>
+	{:else}
+		<span>{BUILD.commit}</span>
+	{/if}
+	{#if built}<span>· built {built}</span>{/if}
+</footer>
+
 <style>
+	footer {
+		max-width: 720px;
+		margin: 0 auto;
+		padding: 1.5rem 1rem 6rem;
+		display: flex;
+		gap: 0.4rem;
+		justify-content: center;
+		font-size: 0.72rem;
+		color: color-mix(in srgb, var(--muted) 65%, transparent);
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	}
+
+	footer a {
+		color: inherit;
+		text-decoration: none;
+		border-bottom: 1px dotted currentColor;
+	}
+
+	footer a:hover {
+		color: var(--accent);
+	}
+
 	header {
 		position: sticky;
 		top: 0;

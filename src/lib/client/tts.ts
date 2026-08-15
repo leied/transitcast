@@ -1,6 +1,7 @@
 import type { Brief, Config } from '$lib/types';
 import { chunkForTts } from '$lib/chunk';
 import { sanitizeForSpeech, isSpeakable } from '$lib/tts-text';
+import { loadKokoro, encodeWav } from './kokoro';
 import { authHeaders } from './uid';
 
 export type RenderProgress = {
@@ -163,29 +164,9 @@ async function renderWithKokoro(
 		loading: 'Downloading voice model…'
 	});
 
-	const { KokoroTTS } = await import('kokoro-js');
-
-	// q8 is the 92MB `model_quantized.onnx`. The upstream README suggests fp32 on
-	// WebGPU, but that file is 326MB — not something to pull onto a phone that's
-	// about to get on a bus.
-	const load = (device: 'webgpu' | 'wasm') =>
-		KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', { dtype: 'q8', device });
-
-	let tts;
-	try {
-		tts = await load('gpu' in navigator ? 'webgpu' : 'wasm');
-	} catch (e) {
-		// WebGPU is refused on plenty of mobile browsers even when navigator.gpu
-		// exists, so fall back rather than giving up.
-		try {
-			tts = await load('wasm');
-		} catch (inner) {
-			const detail = inner instanceof Error ? inner.message : String(inner);
-			throw new Error(
-				`Couldn't load the Kokoro voice model (${detail}). It downloads about 92MB from huggingface.co on first use — check that the network isn't blocking it, then try again.`
-			);
-		}
-	}
+	// Shared with the Settings voice preview, so auditioning a voice warms the
+	// same instance the real render uses.
+	const tts = await loadKokoro();
 
 	const pcm: Float32Array[] = [];
 	let rate = 24000;
@@ -211,43 +192,4 @@ async function renderWithKokoro(
 		throw new Error(`Kokoro produced no audio. Last error: ${reason || 'none reported'}`);
 	}
 	return { blob: encodeWav(pcm, rate), skipped, reason };
-}
-
-/**
- * Kokoro returns raw samples per chunk. WAV files can't just be concatenated
- * the way MP3 frames can, so the PCM is joined and a single header written.
- */
-function encodeWav(chunks: Float32Array[], sampleRate: number): Blob {
-	const length = chunks.reduce((n, c) => n + c.length, 0);
-	const buffer = new ArrayBuffer(44 + length * 2);
-	const view = new DataView(buffer);
-
-	const ascii = (offset: number, text: string) => {
-		for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i));
-	};
-
-	ascii(0, 'RIFF');
-	view.setUint32(4, 36 + length * 2, true);
-	ascii(8, 'WAVE');
-	ascii(12, 'fmt ');
-	view.setUint32(16, 16, true); // PCM header size
-	view.setUint16(20, 1, true); // format: PCM
-	view.setUint16(22, 1, true); // mono
-	view.setUint32(24, sampleRate, true);
-	view.setUint32(28, sampleRate * 2, true); // byte rate
-	view.setUint16(32, 2, true); // block align
-	view.setUint16(34, 16, true); // bits per sample
-	ascii(36, 'data');
-	view.setUint32(40, length * 2, true);
-
-	let offset = 44;
-	for (const chunk of chunks) {
-		for (let i = 0; i < chunk.length; i++) {
-			const s = Math.max(-1, Math.min(1, chunk[i]));
-			view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-			offset += 2;
-		}
-	}
-
-	return new Blob([buffer], { type: 'audio/wav' });
 }

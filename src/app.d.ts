@@ -26,6 +26,11 @@ declare global {
 			caches: CacheStorage;
 		}
 	}
+
+	/** Injected by Vite's `define` — see buildInfo() in vite.config.ts. */
+	const __BUILD_COMMIT__: string;
+	const __BUILD_COMMITTED_AT__: string;
+	const __BUILD_AT__: string;
 }
 
 export {};

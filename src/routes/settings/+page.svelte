@@ -1,10 +1,10 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import type { Config, Feed, Section } from '$lib/types';
 	import { api } from '$lib/client/api';
 	import { getUid } from '$lib/client/uid';
-	import { CHARS_PER_MINUTE } from '$lib/chunk';
 	import { defaultConfig } from '$lib/defaults';
+	import { VOICE_GROUPS, voicesIn, voiceLabel, previewVoice } from '$lib/client/kokoro';
 
 	let config = $state<Config | null>(null);
 	let dirty = $state(false);
@@ -15,6 +15,33 @@
 
 	let newFeed = $state({ name: '', url: '', sections: [] as string[] });
 	let testing = $state<Record<string, string>>({});
+
+	let previewing = $state('');
+	let previewUrl = $state('');
+	let previewError = $state('');
+
+	/** Auditioning a voice beats guessing from a name and a letter grade. */
+	async function preview() {
+		if (!config || previewing) return;
+		const voice = config.tts.kokoroVoice;
+		previewing = voice;
+		previewError = '';
+		try {
+			const blob = await previewVoice(voice);
+			if (previewUrl) URL.revokeObjectURL(previewUrl);
+			previewUrl = URL.createObjectURL(blob);
+			// Autoplay is allowed here: the click that started this counts as the gesture.
+			queueMicrotask(() => document.querySelector<HTMLAudioElement>('audio')?.play());
+		} catch (e) {
+			previewError = e instanceof Error ? e.message : String(e);
+		} finally {
+			previewing = '';
+		}
+	}
+
+	onDestroy(() => {
+		if (previewUrl) URL.revokeObjectURL(previewUrl);
+	});
 
 	onMount(async () => {
 		uid = getUid();
@@ -402,17 +429,35 @@
 					<div>
 						<label for="voice">Kokoro voice</label>
 						<select id="voice" bind:value={config.tts.kokoroVoice} onchange={touch}>
-							<option value="af_heart">Heart (US, female)</option>
-							<option value="af_bella">Bella (US, female)</option>
-							<option value="af_nicole">Nicole (US, female)</option>
-							<option value="am_michael">Michael (US, male)</option>
-							<option value="am_fenrir">Fenrir (US, male)</option>
-							<option value="bf_emma">Emma (UK, female)</option>
-							<option value="bm_george">George (UK, male)</option>
+							{#each VOICE_GROUPS as group (group)}
+								<optgroup label={group}>
+									{#each voicesIn(group) as v (v.id)}
+										<option value={v.id}>{voiceLabel(v)}</option>
+									{/each}
+								</optgroup>
+							{/each}
 						</select>
+
+						<div class="row" style="margin-top: 0.6rem; flex-wrap: wrap">
+							<button onclick={preview} disabled={previewing !== ''}>
+								{previewing === config.tts.kokoroVoice ? 'Rendering…' : 'Preview this voice'}
+							</button>
+							{#if previewUrl}
+								<audio controls src={previewUrl} style="max-width: 100%"></audio>
+							{/if}
+						</div>
+						{#if previewError}
+							<p class="tiny" style="color: var(--bad); margin: 0.4rem 0 0">{previewError}</p>
+						{/if}
+
+						<p class="tiny muted" style="margin: 0.5rem 0 0">
+							Grades are the model author's estimate of each voice's training data, not an opinion
+							about how it sounds — but they predict artefacts well, and the range is wide. Heart
+							and Bella are the only A-grade voices; every American male voice is C+ or below.
+						</p>
 						<p class="tiny muted" style="margin: 0.35rem 0 0">
-							Rendering happens on your phone, so it costs nothing and works offline — but a long
-							brief takes a minute or two to produce.
+							Rendering happens on your device, so it costs nothing and works offline. The first
+							preview downloads about 92MB, then it's cached.
 						</p>
 					</div>
 				{:else}
