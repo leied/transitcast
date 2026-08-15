@@ -107,7 +107,18 @@ export function defaultConfig(): Config {
 		windowHours: 24,
 		feeds: structuredClone(DEFAULT_FEEDS),
 		sections: structuredClone(DEFAULT_SECTIONS),
-		tts: { engine: 'melotts', lang: 'en', kokoroVoice: 'af_heart', rate: 1 },
+		tts: {
+			// Aura rather than MeloTTS: MeloTTS returns error 3043 persistently
+			// (reports since July, an incident on 13 Aug, and every chunk failing on
+			// a live deployment on 15 Aug). Aura is a different upstream, sounds
+			// better, and needs no download — it just costs more of the daily
+			// neuron allowance, which the Settings meter shows.
+			engine: 'aura',
+			lang: 'en',
+			kokoroVoice: 'af_heart',
+			auraSpeaker: 'asteria',
+			rate: 1
+		},
 		schedule: { enabled: false, hourUTC: 13 }
 	};
 }

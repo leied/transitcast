@@ -4,7 +4,23 @@
 	import { api } from '$lib/client/api';
 	import { getUid } from '$lib/client/uid';
 	import { defaultConfig } from '$lib/defaults';
+	import { CHARS_PER_MINUTE } from '$lib/chunk';
 	import { VOICE_GROUPS, voicesIn, voiceLabel, previewVoice } from '$lib/client/kokoro';
+
+	const AURA_SPEAKERS = [
+		{ id: 'asteria', name: 'Asteria', gender: 'F' },
+		{ id: 'luna', name: 'Luna', gender: 'F' },
+		{ id: 'stella', name: 'Stella', gender: 'F' },
+		{ id: 'athena', name: 'Athena', gender: 'F' },
+		{ id: 'hera', name: 'Hera', gender: 'F' },
+		{ id: 'orion', name: 'Orion', gender: 'M' },
+		{ id: 'arcas', name: 'Arcas', gender: 'M' },
+		{ id: 'perseus', name: 'Perseus', gender: 'M' },
+		{ id: 'angus', name: 'Angus', gender: 'M' },
+		{ id: 'orpheus', name: 'Orpheus', gender: 'M' },
+		{ id: 'helios', name: 'Helios', gender: 'M' },
+		{ id: 'zeus', name: 'Zeus', gender: 'M' }
+	];
 
 	let config = $state<Config | null>(null);
 	let dirty = $state(false);
@@ -74,14 +90,25 @@
 	}
 
 	// ── Budget estimate ────────────────────────────────────────────────────────
-	// Worth surfacing: Workers AI gives 10,000 neurons/day free and MeloTTS costs
-	// 18.63 per audio minute, so a long brief is the one thing that can actually
-	// run the account dry.
+	// Workers AI gives 10,000 neurons/day free, and the engines differ by nearly
+	// two orders of magnitude: MeloTTS bills 18.63 per audio minute while Aura
+	// bills 1,363.64 per 1,000 characters. Aura is good enough to be worth it and
+	// cheap enough for one brief a day, but not for four — so show the arithmetic
+	// rather than let someone find out by hitting a wall.
+	const FREE_NEURONS = 10_000;
 	const totalMinutes = $derived(
 		(config?.sections ?? []).filter((s) => s.enabled).reduce((n, s) => n + s.minutes, 0) + 0.3
 	);
-	const neurons = $derived(Math.round(totalMinutes * 18.63));
-	const dailyShare = $derived(Math.min(100, Math.round((neurons / 10_000) * 100)));
+	const totalChars = $derived(Math.round(totalMinutes * CHARS_PER_MINUTE));
+	const neurons = $derived(
+		config?.tts.engine === 'kokoro'
+			? 0
+			: config?.tts.engine === 'aura'
+				? Math.round((totalChars / 1000) * 1363.64)
+				: Math.round(totalMinutes * 18.63)
+	);
+	const dailyShare = $derived(Math.min(100, Math.round((neurons / FREE_NEURONS) * 100)));
+	const briefsPerDay = $derived(neurons > 0 ? Math.floor(FREE_NEURONS / neurons) : Infinity);
 
 	// ── Schedule time zone juggling ────────────────────────────────────────────
 	function tzOffsetHours(tz: string): number {
@@ -420,10 +447,29 @@
 				<div>
 					<label for="engine">Engine</label>
 					<select id="engine" bind:value={config.tts.engine} onchange={touch}>
-						<option value="melotts">MeloTTS — rendered on the server, nothing to download</option>
-						<option value="kokoro">Kokoro — better voice, 92MB download, runs on device</option>
+						<option value="aura">Deepgram Aura — best voice, on the server, uses more allowance</option>
+						<option value="kokoro">Kokoro — free and offline, 92MB download, runs on device</option>
+						<option value="melotts">MeloTTS — cheapest, but currently unreliable</option>
 					</select>
+					{#if config.tts.engine === 'melotts'}
+						<p class="tiny" style="color: var(--warn); margin: 0.4rem 0 0">
+							Heads up: this model has been returning error 3043 persistently — reports since July
+							and every request failing on 15 August. It's by far the cheapest option when it
+							works, so it's still here, but try Aura or Kokoro if renders keep failing.
+						</p>
+					{/if}
 				</div>
+
+				{#if config.tts.engine === 'aura'}
+					<div>
+						<label for="speaker">Aura voice</label>
+						<select id="speaker" bind:value={config.tts.auraSpeaker} onchange={touch}>
+							{#each AURA_SPEAKERS as s (s.id)}
+								<option value={s.id}>{s.name} ({s.gender})</option>
+							{/each}
+						</select>
+					</div>
+				{/if}
 
 				{#if config.tts.engine === 'kokoro'}
 					<div>
@@ -479,15 +525,20 @@
 						<span class="small">Estimated brief length</span>
 						<strong>{totalMinutes.toFixed(1)} min</strong>
 					</div>
-					{#if config.tts.engine === 'melotts'}
-						<div class="bar"><div class="fill" style:width="{dailyShare}%"></div></div>
+					{#if config.tts.engine === 'kokoro'}
 						<p class="tiny muted" style="margin: 0.4rem 0 0">
-							About {neurons.toLocaleString()} of the 10,000 free Workers AI neurons per day ({dailyShare}%).
-							Running out fails the render rather than charging you.
+							Kokoro renders on your device, so this costs nothing at all and works offline.
 						</p>
 					{:else}
+						<div class="bar">
+							<div class="fill" class:hot={dailyShare > 60} style:width="{dailyShare}%"></div>
+						</div>
 						<p class="tiny muted" style="margin: 0.4rem 0 0">
-							Kokoro renders on device, so this costs nothing at all.
+							About {neurons.toLocaleString()} of the 10,000 free Workers AI neurons per day ({dailyShare}%)
+							— roughly
+							{briefsPerDay === Infinity ? 'unlimited' : `${briefsPerDay} brief${briefsPerDay === 1 ? '' : 's'}`}
+							a day, shared across everyone on the account. Running out fails the render rather than
+							charging you.
 						</p>
 					{/if}
 				</div>
@@ -625,6 +676,11 @@
 	.fill {
 		height: 100%;
 		background: var(--accent);
+		transition: width 0.2s ease;
+	}
+
+	.fill.hot {
+		background: var(--warn);
 	}
 
 	.savebar {

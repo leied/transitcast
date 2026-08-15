@@ -2,7 +2,8 @@ import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { env } from '$lib/server/ctx';
 
-const MODEL = '@cf/myshell-ai/melotts';
+const MELOTTS = '@cf/myshell-ai/melotts';
+const AURA = '@cf/deepgram/aura-1';
 
 /** Workers AI hands MeloTTS back as either raw bytes or base64 in a JSON wrapper. */
 function toBytes(result: unknown): Uint8Array | ReadableStream | null {
@@ -37,21 +38,30 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  */
 export const POST: RequestHandler = async ({ request, platform }) => {
 	const e = env(platform);
-	const { text, lang } = (await request.json().catch(() => ({}))) as {
+	const { text, lang, engine, speaker } = (await request.json().catch(() => ({}))) as {
 		text?: string;
 		lang?: string;
+		engine?: string;
+		speaker?: string;
 	};
 
 	const prompt = (text ?? '').trim();
 	if (!prompt) throw error(400, 'text required');
 	if (prompt.length > 1500) throw error(400, 'text too long; chunk it client-side');
 
+	// Aura takes `text`/`speaker` and returns MP3; MeloTTS takes `prompt`/`lang`.
+	const useAura = engine === 'aura';
+	const model = useAura ? AURA : MELOTTS;
+	const input = useAura
+		? { text: prompt, speaker: speaker || 'asteria' }
+		: { prompt, lang: lang || 'en' };
+
 	let result: unknown;
 	let lastError = '';
 
 	for (let attempt = 0; attempt < 3; attempt++) {
 		try {
-			result = await e.AI.run(MODEL, { prompt, lang: lang || 'en' });
+			result = await e.AI.run(model, input as never);
 			lastError = '';
 			break;
 		} catch (err) {
@@ -81,7 +91,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	if (lastError) {
 		// Always carry the raw upstream text through. Guessing at what a Workers AI
 		// error meant is how the allowance message ended up lying.
-		console.error(`melotts failed: ${lastError}`);
+		console.error(`${model} failed: ${lastError}`);
 		throw error(502, {
 			message: `Workers AI could not speak this chunk after three tries: ${lastError.slice(0, 160)}`,
 			upstream: lastError

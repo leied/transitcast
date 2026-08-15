@@ -34,11 +34,13 @@ export type Config = {
 	feeds: Feed[];
 	sections: Section[];
 	tts: {
-		engine: 'melotts' | 'kokoro';
+		engine: 'melotts' | 'aura' | 'kokoro';
 		/** MeloTTS language code. */
 		lang: string;
 		/** Kokoro voice id, used only when engine === 'kokoro'. */
 		kokoroVoice: string;
+		/** Deepgram Aura speaker, used only when engine === 'aura'. */
+		auraSpeaker: string;
 		/** Playback rate baked into nothing — just remembered for the player. */
 		rate: number;
 	};

@@ -7,7 +7,7 @@ import { authHeaders } from './uid';
 export type RenderProgress = {
 	done: number;
 	total: number;
-	engine: 'melotts' | 'kokoro';
+	engine: 'melotts' | 'aura' | 'kokoro';
 	/** Chunks abandoned after retries. Non-fatal; the rest still plays. */
 	skipped?: number;
 	/** Set while the Kokoro weights are downloading, which dominates first use. */
@@ -43,14 +43,14 @@ export async function renderBrief(
 
 	return cfg.tts.engine === 'kokoro'
 		? renderWithKokoro(chunks, cfg, opts)
-		: renderWithMeloTts(chunks, cfg, opts);
+		: renderOnServer(chunks, cfg, opts);
 }
 
 /** Thrown for failures where continuing is pointless, e.g. allowance exhausted. */
 class FatalTtsError extends Error {}
 
 /** Server-side path: one Workers AI call per chunk, MP3 parts concatenated. */
-async function renderWithMeloTts(
+async function renderOnServer(
 	chunks: string[],
 	cfg: Config,
 	opts: RenderOptions
@@ -68,7 +68,12 @@ async function renderWithMeloTts(
 			method: 'POST',
 			signal: opts.signal,
 			headers: { 'content-type': 'application/json', ...authHeaders() },
-			body: JSON.stringify({ text, lang: cfg.tts.lang })
+			body: JSON.stringify({
+				text,
+				engine: cfg.tts.engine,
+				lang: cfg.tts.lang,
+				speaker: cfg.tts.auraSpeaker
+			})
 		});
 
 		if (res.ok) return res.arrayBuffer();
@@ -86,8 +91,8 @@ async function renderWithMeloTts(
 	}
 
 	/**
-	 * MeloTTS returns opaque upstream errors (3043) often enough that losing the
-	 * whole brief to one bad chunk is unacceptable. Halve and retry, then give up
+	 * Workers AI returns opaque upstream errors (3043) often enough that losing
+	 * the whole brief to one bad chunk is unacceptable. Halve and retry, then give up
 	 * on just that fragment — a brief missing one sentence still beats no brief.
 	 */
 	async function speakWithFallback(text: string, depth = 0): Promise<ArrayBuffer[]> {
@@ -129,7 +134,12 @@ async function renderWithMeloTts(
 			if (i >= chunks.length) return;
 			parts[i] = await speakWithFallback(chunks[i]);
 			done++;
-			opts.onProgress?.({ done, total: chunks.length, engine: 'melotts', skipped });
+			opts.onProgress?.({
+				done,
+				total: chunks.length,
+				engine: cfg.tts.engine === 'aura' ? 'aura' : 'melotts',
+				skipped
+			});
 		}
 	};
 
@@ -140,7 +150,7 @@ async function renderWithMeloTts(
 	if (flat.length === 0) {
 		throw new Error(
 			`All ${chunks.length} chunks failed. Workers AI said: ${summariseReasons() || 'no reason given'}. ` +
-				'If this persists, switch the engine to Kokoro in Settings to render on your device instead.'
+				'Try a different engine in Settings — Kokoro renders on your device and depends on nothing upstream.'
 		);
 	}
 
