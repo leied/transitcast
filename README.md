@@ -173,6 +173,24 @@ items and aggregators re-post the same story:
 - Every item **shown to the model** is recorded in a 7-day seen-set, not just the
   ones it quoted. Otherwise stories the model rejected come back every single day.
 
+## Gotcha: Hugging Face blocks `*.workers.dev` referrers
+
+If the Kokoro voice fails to load with a 404 on `huggingface.co/.../tokenizer.json`,
+this is why. Hugging Face 404s file downloads whose `Referer` is a `*.workers.dev`
+host — verified 8 out of 8, while the same request with any other referer, or with
+none at all, returns 200. Only the `Referer` header matters; `Origin` alone is fine.
+
+| Header sent | Response |
+|---|---|
+| `Referer: https://<app>.workers.dev/` | **404** |
+| `Referer: https://<app>.<your-domain>/` | 200 |
+| `Referer: https://example.com/` | 200 |
+| no referer | 200 |
+| `Origin: https://<app>.workers.dev` only | 200 |
+
+`src/app.html` sends `<meta name="referrer" content="no-referrer">` so the app
+works on the free subdomain. Putting the app on a custom domain also fixes it.
+
 ## Known limits
 
 - One cron run builds at most 45 users' briefs (50 subrequests per invocation).

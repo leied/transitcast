@@ -368,6 +368,19 @@
 		margin-bottom: 0.85rem;
 	}
 
+	.head > div:first-child {
+		min-width: 0;
+		flex: 1 1 12rem;
+	}
+
+	.head h1 {
+		font-size: clamp(1.5rem, 8vw, 2rem);
+	}
+
+	.seg {
+		min-width: 0;
+	}
+
 	.error {
 		border-color: #4a2a2e;
 		background: #21161a;
@@ -426,6 +439,7 @@
 		margin-top: 0.7rem;
 		padding-top: 0.6rem;
 		border-top: 1px solid var(--border);
+		min-width: 0;
 	}
 
 	.sources a {
@@ -438,6 +452,10 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+		/* A flex item won't shrink below its content width without this, so a long
+		   headline pushed the whole page wider than the phone. */
+		flex: 0 1 auto;
+		min-width: 0;
 	}
 
 	.sources a:hover {

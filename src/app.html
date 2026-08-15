@@ -4,6 +4,14 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="text-scale" content="scale" />
+		<!--
+			Hugging Face 404s file downloads whose Referer is a *.workers.dev host —
+			verified 8/8, while the same request with any other referer, or none,
+			returns 200. That silently breaks the Kokoro voice model on the free
+			Cloudflare subdomain. Sending no referrer sidesteps it; we don't rely on
+			the header for anything, and our own API calls are same-origin.
+		-->
+		<meta name="referrer" content="no-referrer" />
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">
