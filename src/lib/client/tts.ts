@@ -1,7 +1,7 @@
 import type { Brief, Config } from '$lib/types';
 import { chunkForTts } from '$lib/chunk';
 import { sanitizeForSpeech, isSpeakable } from '$lib/tts-text';
-import { loadKokoro, encodeWav } from './kokoro';
+import { loadKokoro, generateKokoro, encodeWav, onKokoroDownload, kokoroStatus } from './kokoro';
 import { authHeaders } from './uid';
 
 export type RenderProgress = {
@@ -27,9 +27,14 @@ export type RenderResult = {
 	reason?: string;
 };
 
-function plan(brief: Brief): string[] {
+/**
+ * Kokoro wants shorter pieces than the server engines. StreamingKokoroJS caps
+ * at 300 with the note that 400 "seems too long for kokoro", and long inputs
+ * are where it starts rushing and slurring.
+ */
+function plan(brief: Brief, max?: number): string[] {
 	return brief.segments
-		.flatMap((s) => chunkForTts(sanitizeForSpeech(s.text)))
+		.flatMap((s) => chunkForTts(sanitizeForSpeech(s.text), max))
 		.filter(isSpeakable);
 }
 
@@ -38,12 +43,11 @@ export async function renderBrief(
 	cfg: Config,
 	opts: RenderOptions = {}
 ): Promise<RenderResult> {
-	const chunks = plan(brief);
+	const kokoro = cfg.tts.engine === 'kokoro';
+	const chunks = plan(brief, kokoro ? 300 : undefined);
 	if (chunks.length === 0) throw new Error('nothing to speak');
 
-	return cfg.tts.engine === 'kokoro'
-		? renderWithKokoro(chunks, cfg, opts)
-		: renderOnServer(chunks, cfg, opts);
+	return kokoro ? renderWithKokoro(chunks, cfg, opts) : renderOnServer(chunks, cfg, opts);
 }
 
 /** Thrown for failures where continuing is pointless, e.g. allowance exhausted. */
@@ -159,8 +163,8 @@ async function renderOnServer(
 }
 
 /**
- * On-device path. Costs nothing and works offline, at the price of a ~92MB
- * one-time model download (cached by the browser afterwards).
+ * On-device path. Costs nothing and works offline, at the price of a one-time
+ * model download. Inference happens in a worker so the tab stays usable.
  */
 async function renderWithKokoro(
 	chunks: string[],
@@ -171,12 +175,25 @@ async function renderWithKokoro(
 		done: 0,
 		total: chunks.length,
 		engine: 'kokoro',
-		loading: 'Downloading voice model…'
+		loading: 'Loading voice model…'
 	});
 
-	// Shared with the Settings voice preview, so auditioning a voice warms the
-	// same instance the real render uses.
-	const tts = await loadKokoro();
+	// Downloading the weights dominates first use, so report it rather than
+	// looking frozen.
+	onKokoroDownload((fraction) =>
+		opts.onProgress?.({
+			done: 0,
+			total: chunks.length,
+			engine: 'kokoro',
+			loading: `Downloading voice model… ${Math.round(fraction * 100)}%`
+		})
+	);
+
+	try {
+		await loadKokoro(cfg.tts.kokoroDtype || undefined);
+	} finally {
+		onKokoroDownload(null);
+	}
 
 	const pcm: Float32Array[] = [];
 	let rate = 24000;
@@ -186,9 +203,9 @@ async function renderWithKokoro(
 	for (const [i, chunk] of chunks.entries()) {
 		if (opts.signal?.aborted) throw new Error('cancelled');
 		try {
-			const audio = await tts.generate(chunk, { voice: cfg.tts.kokoroVoice as never });
-			pcm.push(audio.audio as Float32Array);
-			rate = audio.sampling_rate;
+			const out = await generateKokoro(chunk, cfg.tts.kokoroVoice, cfg.tts.kokoroDtype || undefined);
+			pcm.push(out.pcm);
+			rate = out.rate;
 		} catch (e) {
 			// One unpronounceable fragment shouldn't cost the whole brief, but the
 			// reason still has to reach the surface.
@@ -199,7 +216,11 @@ async function renderWithKokoro(
 	}
 
 	if (pcm.length === 0) {
-		throw new Error(`Kokoro produced no audio. Last error: ${reason || 'none reported'}`);
+		const where = kokoroStatus();
+		throw new Error(
+			`Kokoro produced no audio (${where?.device ?? 'unknown backend'}/${where?.dtype ?? '?'}). ` +
+				`Last error: ${reason || 'none reported'}`
+		);
 	}
 	return { blob: encodeWav(pcm, rate), skipped, reason };
 }

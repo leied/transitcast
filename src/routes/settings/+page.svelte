@@ -5,7 +5,13 @@
 	import { getUid } from '$lib/client/uid';
 	import { defaultConfig } from '$lib/defaults';
 	import { CHARS_PER_MINUTE } from '$lib/chunk';
-	import { VOICE_GROUPS, voicesIn, voiceLabel, previewVoice } from '$lib/client/kokoro';
+	import {
+		VOICE_GROUPS,
+		voicesIn,
+		voiceLabel,
+		previewVoice,
+		kokoroStatus
+	} from '$lib/client/kokoro';
 
 	const AURA_SPEAKERS = [
 		{ id: 'asteria', name: 'Asteria', gender: 'F' },
@@ -35,6 +41,7 @@
 	let previewing = $state('');
 	let previewUrl = $state('');
 	let previewError = $state('');
+	let backend = $state<{ device: string; dtype: string } | null>(null);
 
 	/** Auditioning a voice beats guessing from a name and a letter grade. */
 	async function preview() {
@@ -43,7 +50,7 @@
 		previewing = voice;
 		previewError = '';
 		try {
-			const blob = await previewVoice(voice);
+			const blob = await previewVoice(voice, config.tts.kokoroDtype || undefined);
 			if (previewUrl) URL.revokeObjectURL(previewUrl);
 			previewUrl = URL.createObjectURL(blob);
 			// Autoplay is allowed here: the click that started this counts as the gesture.
@@ -52,6 +59,9 @@
 			previewError = e instanceof Error ? e.message : String(e);
 		} finally {
 			previewing = '';
+			// Surface which backend actually ran; it's the difference between
+			// speech and noise, and it isn't otherwise visible.
+			backend = kokoroStatus();
 		}
 	}
 
@@ -484,6 +494,22 @@
 							{/each}
 						</select>
 
+						<div style="margin-top: 0.75rem">
+							<label for="dtype">Model precision</label>
+							<select id="dtype" bind:value={config.tts.kokoroDtype} onchange={touch}>
+								<option value="">Match the backend (recommended)</option>
+								<option value="fp32">fp32 — 326MB, highest quality</option>
+								<option value="q4f16">q4f16 — 154MB, smaller download</option>
+								<option value="fp16">fp16 — 163MB</option>
+								<option value="q8">q8 — 92MB, WASM only</option>
+							</select>
+							<p class="tiny muted" style="margin: 0.35rem 0 0">
+								Leave this alone unless the voice sounds wrong. Precision has to match the
+								backend: int8 weights (q8, q4) on WebGPU synthesise noise rather than speech,
+								which is why "match the backend" picks fp32 on WebGPU and q8 only on WASM.
+							</p>
+						</div>
+
 						<div class="row" style="margin-top: 0.6rem; flex-wrap: wrap">
 							<button onclick={preview} disabled={previewing !== ''}>
 								{previewing === config.tts.kokoroVoice ? 'Rendering…' : 'Preview this voice'}
@@ -494,6 +520,11 @@
 						</div>
 						{#if previewError}
 							<p class="tiny" style="color: var(--bad); margin: 0.4rem 0 0">{previewError}</p>
+						{/if}
+						{#if backend}
+							<p class="tiny muted" style="margin: 0.4rem 0 0">
+								Rendered on <strong>{backend.device}</strong> at <strong>{backend.dtype}</strong>.
+							</p>
 						{/if}
 
 						<p class="tiny muted" style="margin: 0.5rem 0 0">

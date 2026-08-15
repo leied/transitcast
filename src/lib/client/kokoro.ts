@@ -88,47 +88,99 @@ export function voiceLabel(v: KokoroVoice): string {
 	return bits.join(' · ');
 }
 
-type Kokoro = { generate(text: string, opts: { voice: string }): Promise<AudioLike> };
-type AudioLike = { audio: Float32Array; sampling_rate: number };
+export type KokoroStatus = { device: string; dtype: string };
 
-let cached: Promise<Kokoro> | null = null;
+type Pending = { resolve: (v: never) => void; reject: (e: Error) => void };
+
+let worker: Worker | null = null;
+let nextId = 1;
+const pending = new Map<number, Pending>();
+let status: KokoroStatus | null = null;
+let onDownload: ((fraction: number) => void) | null = null;
+
+/** Fraction 0-1 of the model download, or null once loaded. */
+export function onKokoroDownload(cb: ((fraction: number) => void) | null) {
+	onDownload = cb;
+}
+
+export function kokoroStatus(): KokoroStatus | null {
+	return status;
+}
+
+function ensureWorker(): Worker {
+	if (worker) return worker;
+	worker = new Worker(new URL('./kokoro-worker.ts', import.meta.url), { type: 'module' });
+	worker.onmessage = (e: MessageEvent) => {
+		const d = e.data;
+		if (d?.type === 'status') {
+			status = { device: d.device, dtype: d.dtype };
+			return;
+		}
+		if (d?.type === 'progress') {
+			onDownload?.(Math.max(0, Math.min(1, (d.progress ?? 0) / 100)));
+			return;
+		}
+		const p = pending.get(d?.id);
+		if (!p) return;
+		pending.delete(d.id);
+		if (d.ok) p.resolve(d as never);
+		else p.reject(new Error(d.error || 'Kokoro worker failed'));
+	};
+	worker.onerror = (e) => {
+		for (const [, p] of pending) p.reject(new Error(e.message || 'Kokoro worker crashed'));
+		pending.clear();
+		worker?.terminate();
+		worker = null;
+	};
+	return worker;
+}
+
+function call<T>(payload: Record<string, unknown>): Promise<T> {
+	const w = ensureWorker();
+	const id = nextId++;
+	return new Promise<T>((resolve, reject) => {
+		pending.set(id, { resolve: resolve as never, reject });
+		w.postMessage({ id, ...payload });
+	});
+}
 
 /**
- * Loads the model once per page. q8 is the 92MB `model_quantized.onnx`; the
- * upstream README suggests fp32 on WebGPU but that file is 326MB, which is not
- * something to pull onto a phone. WebGPU is refused on plenty of mobile
- * browsers even when navigator.gpu exists, hence the fallback.
+ * Loads the model in a worker. dtype is chosen there to match the backend:
+ * int8 weights on WebGPU synthesise noise instead of speech, which is the
+ * single most important thing this file gets right.
  */
-export function loadKokoro(): Promise<Kokoro> {
-	cached ??= (async () => {
-		const { KokoroTTS } = await import('kokoro-js');
-		const load = (device: 'webgpu' | 'wasm') =>
-			KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', { dtype: 'q8', device });
-		try {
-			return (await load('gpu' in navigator ? 'webgpu' : 'wasm')) as unknown as Kokoro;
-		} catch {
-			try {
-				return (await load('wasm')) as unknown as Kokoro;
-			} catch (inner) {
-				cached = null; // let a later attempt retry rather than reuse the failure
-				const detail = inner instanceof Error ? inner.message : String(inner);
-				throw new Error(
-					`Couldn't load the Kokoro voice model (${detail}). It downloads about 92MB from huggingface.co on first use — check the network isn't blocking it, then try again.`
-				);
-			}
-		}
-	})();
-	return cached;
+export async function loadKokoro(dtype?: string): Promise<void> {
+	try {
+		await call<{ device: string; dtype: string }>({ type: 'load', dtype });
+	} catch (e) {
+		const detail = e instanceof Error ? e.message : String(e);
+		throw new Error(
+			`Couldn't load the Kokoro voice model (${detail}). It downloads from huggingface.co on first use — check the network isn't blocking it, then try again.`
+		);
+	}
+}
+
+export async function generateKokoro(
+	text: string,
+	voice: string,
+	dtype?: string
+): Promise<{ pcm: Float32Array; rate: number }> {
+	const r = await call<{ pcm: Float32Array; rate: number }>({
+		type: 'generate',
+		text,
+		voice,
+		dtype
+	});
+	return { pcm: r.pcm, rate: r.rate };
 }
 
 export const SAMPLE_TEXT =
 	'Good morning. Markets opened lower after the central bank held rates steady, and transit riders face delays on three routes downtown.';
 
 /** Renders a short sample so a voice can be judged before committing to it. */
-export async function previewVoice(voice: string): Promise<Blob> {
-	const tts = await loadKokoro();
-	const audio = await tts.generate(SAMPLE_TEXT, { voice });
-	return encodeWav([audio.audio], audio.sampling_rate);
+export async function previewVoice(voice: string, dtype?: string): Promise<Blob> {
+	const { pcm, rate } = await generateKokoro(SAMPLE_TEXT, voice, dtype);
+	return encodeWav([pcm], rate);
 }
 
 /**

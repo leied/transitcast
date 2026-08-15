@@ -39,6 +39,9 @@ export type Config = {
 		lang: string;
 		/** Kokoro voice id, used only when engine === 'kokoro'. */
 		kokoroVoice: string;
+		/** Kokoro weight precision. Empty means pick to match the backend, which
+		 *  is what you want — int8 weights on WebGPU synthesise noise. */
+		kokoroDtype: '' | 'fp32' | 'fp16' | 'q4f16' | 'q8';
 		/** Deepgram Aura speaker, used only when engine === 'aura'. */
 		auraSpeaker: string;
 		/** Playback rate baked into nothing — just remembered for the player. */

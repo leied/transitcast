@@ -116,6 +116,7 @@ export function defaultConfig(): Config {
 			engine: 'aura',
 			lang: 'en',
 			kokoroVoice: 'af_heart',
+			kokoroDtype: '',
 			auraSpeaker: 'asteria',
 			rate: 1
 		},
