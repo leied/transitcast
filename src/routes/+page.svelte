@@ -143,6 +143,21 @@
 		}
 	}
 
+	/** Offered only when the server-side engine failed and the local one is untried. */
+	const offerKokoro = $derived(!!error && !busy && config?.tts.engine === 'melotts');
+
+	async function switchToKokoro() {
+		if (!config) return;
+		config.tts.engine = 'kokoro';
+		error = '';
+		try {
+			await api.putConfig(config);
+		} catch {
+			// Rendering matters more than remembering the choice; carry on.
+		}
+		await speak();
+	}
+
 	function cancel() {
 		controller?.abort();
 	}
@@ -202,7 +217,19 @@
 <div class="wrap">
 	{#if error}
 		<div class="card error">
-			<strong>{error}</strong>
+			<div class="stack" style="gap: 0.6rem">
+				<strong>{error}</strong>
+				{#if offerKokoro}
+					<!-- MeloTTS failing wholesale is common enough that the recovery
+					     shouldn't be "go read Settings". Not automatic, though: Kokoro
+					     pulls 92MB, which is rude to start on someone's mobile data. -->
+					<div class="row" style="flex-wrap: wrap">
+						<button class="primary small" onclick={switchToKokoro}>
+							Render with Kokoro instead (92MB, on device)
+						</button>
+					</div>
+				{/if}
+			</div>
 			<button class="ghost small" onclick={() => (error = '')}>Dismiss</button>
 		</div>
 	{/if}
