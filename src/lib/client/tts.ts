@@ -190,7 +190,7 @@ async function renderWithKokoro(
 	);
 
 	try {
-		await loadKokoro(cfg.tts.kokoroDtype || undefined);
+		await loadKokoro(cfg.tts.kokoroMode || undefined);
 	} finally {
 		onKokoroDownload(null);
 	}
@@ -203,7 +203,7 @@ async function renderWithKokoro(
 	for (const [i, chunk] of chunks.entries()) {
 		if (opts.signal?.aborted) throw new Error('cancelled');
 		try {
-			const out = await generateKokoro(chunk, cfg.tts.kokoroVoice, cfg.tts.kokoroDtype || undefined);
+			const out = await generateKokoro(chunk, cfg.tts.kokoroVoice, cfg.tts.kokoroMode || undefined);
 			pcm.push(out.pcm);
 			rate = out.rate;
 		} catch (e) {

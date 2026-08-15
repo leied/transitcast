@@ -50,7 +50,7 @@
 		previewing = voice;
 		previewError = '';
 		try {
-			const blob = await previewVoice(voice, config.tts.kokoroDtype || undefined);
+			const blob = await previewVoice(voice, config.tts.kokoroMode || undefined);
 			if (previewUrl) URL.revokeObjectURL(previewUrl);
 			previewUrl = URL.createObjectURL(blob);
 			// Autoplay is allowed here: the click that started this counts as the gesture.
@@ -495,18 +495,20 @@
 						</select>
 
 						<div style="margin-top: 0.75rem">
-							<label for="dtype">Model precision</label>
-							<select id="dtype" bind:value={config.tts.kokoroDtype} onchange={touch}>
-								<option value="">Match the backend (recommended)</option>
-								<option value="fp32">fp32 — 326MB, highest quality</option>
-								<option value="q4f16">q4f16 — 154MB, smaller download</option>
-								<option value="fp16">fp16 — 163MB</option>
-								<option value="q8">q8 — 92MB, WASM only</option>
+							<label for="mode">Rendering</label>
+							<select id="mode" bind:value={config.tts.kokoroMode} onchange={touch}>
+								<option value="">Automatic — WebGPU if available</option>
+								<option value="webgpu-fp32">WebGPU · fp32 — fastest, 326MB</option>
+								<option value="webgpu-q4f16">WebGPU · q4f16 — faster, 154MB</option>
+								<option value="wasm-q8">CPU · q8 — slowest, most reliable, 92MB</option>
+								<option value="wasm-fp32">CPU · fp32 — slow, 326MB</option>
 							</select>
 							<p class="tiny muted" style="margin: 0.35rem 0 0">
-								Leave this alone unless the voice sounds wrong. Precision has to match the
-								backend: int8 weights (q8, q4) on WebGPU synthesise noise rather than speech,
-								which is why "match the backend" picks fp32 on WebGPU and q8 only on WASM.
+								Backend and precision are one setting because they have to agree. <strong
+									>If the voice sounds fine at the start and degrades later, pick CPU · q8</strong
+								> — some devices lose accuracy through long utterances on the WebGPU backend, which
+								shows up as the back half going quiet and mushy. CPU is several times slower but
+								matches the reference output.
 							</p>
 						</div>
 

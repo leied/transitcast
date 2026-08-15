@@ -135,9 +135,9 @@ function call<T>(payload: Record<string, unknown>): Promise<T> {
  * int8 weights on WebGPU synthesise noise instead of speech, which is the
  * single most important thing this file gets right.
  */
-export async function loadKokoro(dtype?: string): Promise<void> {
+export async function loadKokoro(mode?: string): Promise<void> {
 	try {
-		await call<{ device: string; dtype: string }>({ type: 'load', dtype });
+		await call<{ device: string; dtype: string }>({ type: 'load', mode });
 	} catch (e) {
 		const detail = e instanceof Error ? e.message : String(e);
 		throw new Error(
@@ -149,13 +149,13 @@ export async function loadKokoro(dtype?: string): Promise<void> {
 export async function generateKokoro(
 	text: string,
 	voice: string,
-	dtype?: string
+	mode?: string
 ): Promise<{ pcm: Float32Array; rate: number }> {
 	const r = await call<{ pcm: Float32Array; rate: number }>({
 		type: 'generate',
 		text,
 		voice,
-		dtype
+		mode
 	});
 	return { pcm: r.pcm, rate: r.rate };
 }
@@ -164,9 +164,9 @@ export const SAMPLE_TEXT =
 	'Good morning. Markets opened lower after the central bank held rates steady, and transit riders face delays on three routes downtown.';
 
 /** Renders a short sample so a voice can be judged before committing to it. */
-export async function previewVoice(voice: string, dtype?: string): Promise<Blob> {
+export async function previewVoice(voice: string, mode?: string): Promise<Blob> {
 	// Same treatment the brief gets, so the audition matches the real thing.
-	const { pcm, rate } = await generateKokoro(sanitizeForSpeech(SAMPLE_TEXT), voice, dtype);
+	const { pcm, rate } = await generateKokoro(sanitizeForSpeech(SAMPLE_TEXT), voice, mode);
 	return encodeWav([pcm], rate);
 }
 

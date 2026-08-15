@@ -9,10 +9,11 @@ import { KokoroTTS } from 'kokoro-js';
  * implementation (StreamingKokoroJS, HeadTTS) puts the model in a worker.
  */
 
-type LoadRequest = { id: number; type: 'load'; dtype?: Dtype };
-type GenerateRequest = { id: number; type: 'generate'; text: string; voice: string; dtype?: Dtype };
+type LoadRequest = { id: number; type: 'load'; mode?: string };
+type GenerateRequest = { id: number; type: 'generate'; text: string; voice: string; mode?: string };
 type Request = LoadRequest | GenerateRequest;
 type Dtype = 'fp32' | 'fp16' | 'q4f16' | 'q8';
+type Device = 'webgpu' | 'wasm';
 
 const MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX';
 
@@ -28,17 +29,31 @@ async function hasWebGPU(): Promise<boolean> {
 
 let loading: Promise<{ tts: KokoroTTS; device: string; dtype: Dtype }> | null = null;
 
-function load(preferred?: Dtype) {
+/**
+ * Backend and precision are one decision, not two: q8 only makes sense on
+ * WASM, and fp32 is what the WebGPU path expects. Pairing them in a single
+ * setting stops anyone assembling a combination that produces noise.
+ */
+function resolveMode(mode: string | undefined, canWebGPU: boolean): { device: Device; dtype: Dtype } {
+	switch (mode) {
+		case 'webgpu-fp32':
+			return { device: 'webgpu', dtype: 'fp32' };
+		case 'webgpu-q4f16':
+			return { device: 'webgpu', dtype: 'q4f16' };
+		case 'wasm-q8':
+			return { device: 'wasm', dtype: 'q8' };
+		case 'wasm-fp32':
+			return { device: 'wasm', dtype: 'fp32' };
+		default:
+			return canWebGPU ? { device: 'webgpu', dtype: 'fp32' } : { device: 'wasm', dtype: 'q8' };
+	}
+}
+
+function load(mode?: string) {
 	loading ??= (async () => {
 		// Asking for the adapter is the real test — navigator.gpu exists on plenty
 		// of mobile browsers that then refuse to hand one over.
-		const device: 'webgpu' | 'wasm' = (await hasWebGPU()) ? 'webgpu' : 'wasm';
-
-		// The dtype must match the backend. int8 weights on the WebGPU backend
-		// produce audible noise rather than speech — kokoro-js's own README says
-		// q8 and q4 "are not recommended for this model", and every reference
-		// implementation picks fp32 for WebGPU and reserves q8 for WASM.
-		const dtype: Dtype = preferred ?? (device === 'webgpu' ? 'fp32' : 'q8');
+		const { device, dtype } = resolveMode(mode, await hasWebGPU());
 
 		self.postMessage({ type: 'status', device, dtype });
 
@@ -63,12 +78,12 @@ self.onmessage = async (event: MessageEvent<Request>) => {
 	const msg = event.data;
 	try {
 		if (msg.type === 'load') {
-			const { device, dtype } = await load(msg.dtype);
+			const { device, dtype } = await load(msg.mode);
 			self.postMessage({ id: msg.id, ok: true, device, dtype });
 			return;
 		}
 
-		const { tts } = await load(msg.dtype);
+		const { tts } = await load(msg.mode);
 		const audio = await tts.generate(msg.text, { voice: msg.voice as never });
 		const pcm = audio.audio as Float32Array;
 		// Transfer rather than copy; these buffers are megabytes each.
