@@ -17,16 +17,6 @@ export const DEFAULT_SECTIONS: Section[] = [
 		enabled: true
 	},
 	{
-		id: 'china',
-		title: 'China Watch',
-		prompt:
-			'Chinese politics, censorship, human rights and diaspora pressure. Report plainly and ' +
-			'specifically, naming who did what to whom. Do not soften or hedge state conduct, and do ' +
-			'not editorialise either — the facts carry it.',
-		minutes: 3,
-		enabled: true
-	},
-	{
 		id: 'tech',
 		title: 'Tech & Security',
 		prompt:
@@ -78,12 +68,6 @@ export const DEFAULT_FEEDS: Feed[] = [
 	{ id: 'guardian-world', name: 'The Guardian — World', url: 'https://www.theguardian.com/world/rss', sections: ['world'], enabled: true },
 	{ id: 'npr', name: 'NPR News', url: 'https://feeds.npr.org/1001/rss.xml', sections: ['world'], enabled: true },
 	{ id: 'aljazeera', name: 'Al Jazeera', url: 'https://www.aljazeera.com/xml/rss/all.xml', sections: ['world'], enabled: true },
-
-	// China
-	{ id: 'cdt', name: 'China Digital Times', url: 'https://chinadigitaltimes.net/feed/', sections: ['china'], enabled: true },
-	{ id: 'whatsonweibo', name: "What's on Weibo", url: 'https://www.whatsonweibo.com/feed/', sections: ['china'], enabled: true },
-	{ id: 'cmp', name: 'China Media Project', url: 'https://chinamediaproject.org/feed/', sections: ['china'], enabled: true },
-	{ id: 'bitterwinter', name: 'Bitter Winter', url: 'https://bitterwinter.org/feed/', sections: ['china'], enabled: true },
 
 	// Tech & security
 	{ id: 'thn', name: 'The Hacker News', url: 'https://feeds.feedburner.com/TheHackersNews', sections: ['tech'], enabled: true },

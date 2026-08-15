@@ -122,11 +122,13 @@ export async function fetchFeed(feed: Feed, opts: FetchFeedOptions): Promise<Fee
 		const res = await fetch(feed.url, {
 			signal: opts.signal,
 			headers: {
-				// Several publishers (China Digital Times among them) 403 a bare
-				// fetch. A normal UA and an explicit Accept get through.
+				// Publishers behind bot protection (the Seattle Times among them)
+				// 403 anything that self-identifies as a crawler, so present as an
+				// ordinary browser. Feeds are published to be read.
 				'user-agent':
-					'Mozilla/5.0 (compatible; transitcast/1.0; +https://github.com/leied/transitcast)',
-				accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*'
+					'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+				accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
+				'accept-language': 'en-US,en;q=0.9'
 			}
 		});
 		if (!res.ok) return { ...base, error: `HTTP ${res.status}` };

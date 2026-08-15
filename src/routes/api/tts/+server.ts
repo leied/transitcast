@@ -23,10 +23,17 @@ function toBytes(result: unknown): Uint8Array | ReadableStream | null {
 	return null;
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 /**
  * One chunk of speech per request. MeloTTS costs 18.63 neurons per audio
  * minute against a 10,000/day free allowance, which is roughly nine hours of
  * speech a day across the whole account. Overage errors rather than bills.
+ *
+ * Error 3043 ("Internal server error") comes back from this model often enough
+ * to be a design consideration rather than an edge case — Cloudflare has had
+ * open reports against MeloTTS since July and an incident on 13 Aug 2026. It's
+ * usually transient, so retry here and let the client skip past what survives.
  */
 export const POST: RequestHandler = async ({ request, platform }) => {
 	const e = env(platform);
@@ -40,17 +47,41 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	if (prompt.length > 1500) throw error(400, 'text too long; chunk it client-side');
 
 	let result: unknown;
-	try {
-		result = await e.AI.run(MODEL, { prompt, lang: lang || 'en' });
-	} catch (err) {
-		const message = err instanceof Error ? err.message : 'Workers AI call failed';
-		// The daily neuron allowance running out looks like a generic failure;
-		// name it so the UI can say something true instead of "try again".
-		const outOfBudget = /neuron|quota|limit|exceed/i.test(message);
-		throw error(outOfBudget ? 429 : 502, {
-			message: outOfBudget
-				? "Workers AI daily free allowance is used up (10,000 neurons ≈ 9 hours of speech). It resets at 00:00 UTC."
-				: message
+	let lastError = '';
+
+	for (let attempt = 0; attempt < 3; attempt++) {
+		try {
+			result = await e.AI.run(MODEL, { prompt, lang: lang || 'en' });
+			lastError = '';
+			break;
+		} catch (err) {
+			lastError = err instanceof Error ? err.message : 'Workers AI call failed';
+
+			// The daily neuron allowance running out is permanent until 00:00 UTC;
+			// don't burn retries on it.
+			if (/3036|neuron|quota|allocation|exceed/i.test(lastError)) {
+				throw error(429, {
+					message:
+						'Workers AI daily free allowance is used up (10,000 neurons ≈ 9 hours of speech). It resets at 00:00 UTC. Switch the engine to Kokoro in Settings to keep going — it renders on your device for free.'
+				} as App.Error);
+			}
+
+			// 3040 is "out of capacity", 3043 is the generic upstream failure.
+			// Both are worth another go after a moment.
+			if (attempt < 2 && /3040|3043|capacity|internal server|timeout|3007/i.test(lastError)) {
+				await sleep(400 * (attempt + 1));
+				continue;
+			}
+			break;
+		}
+	}
+
+	if (lastError) {
+		const upstream = /3043|3040|internal server/i.test(lastError);
+		throw error(502, {
+			message: upstream
+				? `Workers AI failed three times on this chunk (${lastError.slice(0, 80)}). This model has had recurring upstream errors; if it keeps up, switch the engine to Kokoro in Settings.`
+				: lastError
 		} as App.Error);
 	}
 

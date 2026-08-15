@@ -5,6 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"setup": "node scripts/setup.js",
+		"check:tts": "node scripts/check-tts.js",
 		"dev": "vite dev",
 		"build": "vite build",
 		"deploy": "vite build && wrangler deploy && wrangler deploy -c cron/wrangler.jsonc",

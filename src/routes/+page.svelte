@@ -16,6 +16,7 @@
 	let status = $state('');
 	let error = $state('');
 	let progress = $state(0);
+	let skippedChunks = $state(0);
 
 	let player = $state<HTMLAudioElement | null>(null);
 	let playing = $state(false);
@@ -114,10 +115,12 @@
 				progress = p.total ? p.done / p.total : 0;
 			};
 
-			const blob = await renderBrief(brief, config, {
+			const { blob, skipped } = await renderBrief(brief, config, {
 				onProgress,
 				signal: controller.signal
 			});
+
+			skippedChunks = skipped;
 
 			await audioStore.put({
 				id: brief.id,
@@ -253,6 +256,18 @@
 					{/each}
 				</ul>
 			</details>
+		{/if}
+
+		{#if skippedChunks > 0}
+			<div class="card warn">
+				<span class="small"
+					>{skippedChunks} passage{skippedChunks === 1 ? '' : 's'} couldn't be spoken and {skippedChunks ===
+					1
+						? 'was'
+						: 'were'} left out. Workers AI has recurring upstream errors on this model — switching the
+					engine to Kokoro in Settings renders on your device instead.</span
+				>
+			</div>
 		{/if}
 
 		{#if audioUrl}

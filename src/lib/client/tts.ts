@@ -1,11 +1,14 @@
 import type { Brief, Config } from '$lib/types';
 import { chunkForTts } from '$lib/chunk';
+import { sanitizeForSpeech, isSpeakable } from '$lib/tts-text';
 import { authHeaders } from './uid';
 
 export type RenderProgress = {
 	done: number;
 	total: number;
 	engine: 'melotts' | 'kokoro';
+	/** Chunks abandoned after retries. Non-fatal; the rest still plays. */
+	skipped?: number;
 	/** Set while the Kokoro weights are downloading, which dominates first use. */
 	loading?: string;
 };
@@ -15,15 +18,23 @@ export type RenderOptions = {
 	signal?: AbortSignal;
 };
 
+export type RenderResult = {
+	blob: Blob;
+	/** Chunks that never rendered. The audio is still playable without them. */
+	skipped: number;
+};
+
 function plan(brief: Brief): string[] {
-	return brief.segments.flatMap((s) => chunkForTts(s.text));
+	return brief.segments
+		.flatMap((s) => chunkForTts(sanitizeForSpeech(s.text)))
+		.filter(isSpeakable);
 }
 
 export async function renderBrief(
 	brief: Brief,
 	cfg: Config,
 	opts: RenderOptions = {}
-): Promise<Blob> {
+): Promise<RenderResult> {
 	const chunks = plan(brief);
 	if (chunks.length === 0) throw new Error('nothing to speak');
 
@@ -32,44 +43,89 @@ export async function renderBrief(
 		: renderWithMeloTts(chunks, cfg, opts);
 }
 
+/** Thrown for failures where continuing is pointless, e.g. allowance exhausted. */
+class FatalTtsError extends Error {}
+
 /** Server-side path: one Workers AI call per chunk, MP3 parts concatenated. */
 async function renderWithMeloTts(
 	chunks: string[],
 	cfg: Config,
 	opts: RenderOptions
-): Promise<Blob> {
-	const parts = new Array<ArrayBuffer>(chunks.length);
+): Promise<RenderResult> {
+	const parts = new Array<ArrayBuffer[]>(chunks.length);
 	let done = 0;
 	let next = 0;
+	let skipped = 0;
+
+	async function speak(text: string): Promise<ArrayBuffer> {
+		const res = await fetch('/api/tts', {
+			method: 'POST',
+			signal: opts.signal,
+			headers: { 'content-type': 'application/json', ...authHeaders() },
+			body: JSON.stringify({ text, lang: cfg.tts.lang })
+		});
+
+		if (res.ok) return res.arrayBuffer();
+
+		const detail = (await res.json().catch(() => ({}))) as { message?: string };
+		const message = detail.message || `speech failed with ${res.status}`;
+		// Out of allowance, or the engine is simply unavailable — every remaining
+		// chunk will fail the same way, so stop rather than grind through them.
+		if (res.status === 429) throw new FatalTtsError(message);
+		throw new Error(message);
+	}
+
+	/**
+	 * MeloTTS returns opaque upstream errors (3043) often enough that losing the
+	 * whole brief to one bad chunk is unacceptable. Halve and retry, then give up
+	 * on just that fragment — a brief missing one sentence still beats no brief.
+	 */
+	async function speakWithFallback(text: string, depth = 0): Promise<ArrayBuffer[]> {
+		try {
+			return [await speak(text)];
+		} catch (e) {
+			if (e instanceof FatalTtsError) throw e;
+			if (opts.signal?.aborted) throw e;
+
+			if (depth < 2 && text.length > 120) {
+				const middle = text.lastIndexOf(' ', Math.floor(text.length / 2));
+				const at = middle > 40 ? middle : Math.floor(text.length / 2);
+				const left = text.slice(0, at).trim();
+				const right = text.slice(at).trim();
+				const [a, b] = await Promise.all([
+					speakWithFallback(left, depth + 1),
+					speakWithFallback(right, depth + 1)
+				]);
+				return [...a, ...b];
+			}
+
+			skipped++;
+			return [];
+		}
+	}
 
 	const worker = async () => {
 		for (;;) {
 			const i = next++;
 			if (i >= chunks.length) return;
-
-			const res = await fetch('/api/tts', {
-				method: 'POST',
-				signal: opts.signal,
-				headers: { 'content-type': 'application/json', ...authHeaders() },
-				body: JSON.stringify({ text: chunks[i], lang: cfg.tts.lang })
-			});
-
-			if (!res.ok) {
-				const detail = (await res.json().catch(() => ({}))) as { message?: string };
-				throw new Error(detail.message || `speech failed with ${res.status}`);
-			}
-
-			parts[i] = await res.arrayBuffer();
+			parts[i] = await speakWithFallback(chunks[i]);
 			done++;
-			opts.onProgress?.({ done, total: chunks.length, engine: 'melotts' });
+			opts.onProgress?.({ done, total: chunks.length, engine: 'melotts', skipped });
 		}
 	};
 
 	// Three at a time: enough to keep it moving, not enough to look like abuse.
 	await Promise.all(Array.from({ length: Math.min(3, chunks.length) }, worker));
 
+	const flat = parts.flat().filter(Boolean);
+	if (flat.length === 0) {
+		throw new Error(
+			'Every chunk failed to render. Workers AI MeloTTS has recurring upstream errors — switch the engine to Kokoro in Settings to render on your device instead.'
+		);
+	}
+
 	// Concatenated MP3 frames play back as one stream in every browser engine.
-	return new Blob(parts, { type: 'audio/mpeg' });
+	return { blob: new Blob(flat, { type: 'audio/mpeg' }), skipped };
 }
 
 /**
@@ -80,7 +136,7 @@ async function renderWithKokoro(
 	chunks: string[],
 	cfg: Config,
 	opts: RenderOptions
-): Promise<Blob> {
+): Promise<RenderResult> {
 	opts.onProgress?.({ done: 0, total: chunks.length, engine: 'kokoro', loading: 'Loading voice model…' });
 
 	const { KokoroTTS } = await import('kokoro-js');
@@ -92,16 +148,23 @@ async function renderWithKokoro(
 
 	const pcm: Float32Array[] = [];
 	let rate = 24000;
+	let skipped = 0;
 
 	for (const [i, chunk] of chunks.entries()) {
 		if (opts.signal?.aborted) throw new Error('cancelled');
-		const audio = await tts.generate(chunk, { voice: cfg.tts.kokoroVoice as never });
-		pcm.push(audio.audio as Float32Array);
-		rate = audio.sampling_rate;
-		opts.onProgress?.({ done: i + 1, total: chunks.length, engine: 'kokoro' });
+		try {
+			const audio = await tts.generate(chunk, { voice: cfg.tts.kokoroVoice as never });
+			pcm.push(audio.audio as Float32Array);
+			rate = audio.sampling_rate;
+		} catch {
+			// One unpronounceable fragment shouldn't cost the whole brief.
+			skipped++;
+		}
+		opts.onProgress?.({ done: i + 1, total: chunks.length, engine: 'kokoro', skipped });
 	}
 
-	return encodeWav(pcm, rate);
+	if (pcm.length === 0) throw new Error('Kokoro produced no audio');
+	return { blob: encodeWav(pcm, rate), skipped };
 }
 
 /**

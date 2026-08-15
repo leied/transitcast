@@ -8,11 +8,15 @@ export function estimateMinutes(chars: number): number {
 /**
  * Split spoken text into TTS-sized pieces on sentence boundaries.
  *
- * MeloTTS doesn't document a maximum input length, so this stays conservative.
+ * MeloTTS doesn't document a maximum input length and fails opaquely when it's
+ * unhappy, so this stays well clear of any limit. Smaller chunks cost nothing
+ * extra — speech is billed per audio minute, not per request — and they make a
+ * single upstream failure cheaper to retry or skip.
+ *
  * Splitting on sentences rather than a hard character count matters: a cut
  * mid-sentence is audible as a swallowed word at the seam.
  */
-export function chunkForTts(text: string, max = 700): string[] {
+export function chunkForTts(text: string, max = 480): string[] {
 	const clean = text.replace(/\s+/g, ' ').trim();
 	if (!clean) return [];
 	if (clean.length <= max) return [clean];
