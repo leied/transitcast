@@ -1,0 +1,30 @@
+{
+	"$schema": "../node_modules/wrangler/config-schema.json",
+	"name": "transitcast-cron",
+	"main": "worker.js",
+	"compatibility_date": "2026-08-14",
+
+	// Same namespace id as the app's wrangler.jsonc — this Worker reads the
+	// configs the app writes.
+	"kv_namespaces": [
+		{
+			"binding": "TC_KV",
+			"id": "REPLACE_WITH_KV_NAMESPACE_ID"
+		}
+	],
+
+	// Hourly; each user's config carries the UTC hour they want.
+	"triggers": {
+		"crons": ["0 * * * *"]
+	},
+
+	"vars": {
+		"APP_ORIGIN": "https://transitcast.workers.dev"
+	},
+
+	"observability": {
+		"enabled": true
+	}
+
+	// Secret (must match the app's): wrangler secret put CRON_SECRET -c cron/wrangler.jsonc
+}
