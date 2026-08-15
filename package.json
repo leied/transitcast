@@ -28,6 +28,7 @@
 		"wrangler": "^4.123.0"
 	},
 	"dependencies": {
+		"@huggingface/transformers": "3.8.1",
 		"fast-xml-parser": "^5.10.1",
 		"kokoro-js": "^1.2.1"
 	}

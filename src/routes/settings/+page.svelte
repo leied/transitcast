@@ -497,7 +497,7 @@
 						<div style="margin-top: 0.75rem">
 							<label for="mode">Rendering</label>
 							<select id="mode" bind:value={config.tts.kokoroMode} onchange={touch}>
-								<option value="">Automatic — CPU, correct everywhere</option>
+								<option value="">Automatic — CPU, correct everywhere (fp32 on ARM, q8 elsewhere)</option>
 								<option value="webgpu-fp32">WebGPU · fp32 — much faster, broken on some GPUs</option>
 								<option value="webgpu-q4f16">WebGPU · q4f16 — faster, 154MB, often silent</option>
 								<option value="wasm-q8">CPU · q8 — reliable, 92MB</option>

@@ -93,6 +93,39 @@ export function kokoroStatus(): KokoroStatus | null {
 	return status;
 }
 
+/** Tear the worker down so the next call starts a fresh one. */
+function resetWorker(reason: Error) {
+	for (const [, p] of pending) p.reject(reason);
+	pending.clear();
+	worker?.terminate();
+	worker = null;
+	status = null;
+}
+
+/**
+ * The worker's `error` event carries no message when its *script* failed to
+ * load — after a redeploy the hashed chunk this page references is gone, and
+ * every attempt fails until the page is reloaded. That was the whole story
+ * behind "Kokoro worker crashed": twelve backend configurations and fifteen
+ * minutes of audio on the reporting machine never produced a real crash.
+ */
+async function explainWorkerError(e: ErrorEvent): Promise<Error> {
+	if (e.message) return new Error(`Kokoro worker crashed: ${e.message}`);
+	try {
+		// Is this build still on the server? Every chunk of a build lives or dies
+		// together, so this module's own URL answers for the worker's.
+		const res = await fetch(import.meta.url, { method: 'HEAD', cache: 'no-store' });
+		if (!res.ok) {
+			return new Error(
+				'TransitCast was updated since this page loaded, so the speech engine could not start. Reload the page and try again.'
+			);
+		}
+	} catch {
+		return new Error('The speech engine could not start — the network dropped while loading it. Check the connection and try again.');
+	}
+	return new Error('Kokoro worker crashed (no details from the browser). Reload the page and try again.');
+}
+
 function ensureWorker(): Worker {
 	if (worker) return worker;
 	worker = new Worker(new URL('./kokoro-worker.ts', import.meta.url), { type: 'module' });
@@ -113,10 +146,7 @@ function ensureWorker(): Worker {
 		else p.reject(new Error(d.error || 'Kokoro worker failed'));
 	};
 	worker.onerror = (e) => {
-		for (const [, p] of pending) p.reject(new Error(e.message || 'Kokoro worker crashed'));
-		pending.clear();
-		worker?.terminate();
-		worker = null;
+		void explainWorkerError(e).then(resetWorker);
 	};
 	return worker;
 }
@@ -151,13 +181,22 @@ export async function generateKokoro(
 	voice: string,
 	mode?: string
 ): Promise<{ pcm: Float32Array; rate: number }> {
-	const r = await call<{ pcm: Float32Array; rate: number }>({
-		type: 'generate',
-		text,
-		voice,
-		mode
-	});
-	return { pcm: r.pcm, rate: r.rate };
+	try {
+		const r = await call<{ pcm: Float32Array; rate: number }>({
+			type: 'generate',
+			text,
+			voice,
+			mode
+		});
+		return { pcm: r.pcm, rate: r.rate };
+	} catch (e) {
+		// transformers.js chains every inference on one promise; once a run
+		// rejects, every later run in that worker rejects with the same error.
+		// A fresh worker reloads the model from cache in a few seconds, which
+		// is much better than silently losing the rest of the brief.
+		resetWorker(e instanceof Error ? e : new Error(String(e)));
+		throw e;
+	}
 }
 
 export const SAMPLE_TEXT =

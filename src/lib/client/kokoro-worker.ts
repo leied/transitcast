@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 import { KokoroTTS } from 'kokoro-js';
+import { env } from '@huggingface/transformers';
 
 /**
  * Kokoro runs here, not on the main thread.
@@ -17,14 +18,39 @@ type Device = 'webgpu' | 'wasm';
 
 const MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX';
 
-async function hasWebGPU(): Promise<boolean> {
+/**
+ * Hugging Face refuses downloads whose Referer is a *.workers.dev host, and a
+ * worker does not inherit the page's <meta name="referrer"> — it sends the
+ * browser default, which is the origin. Measured: from a workers.dev origin the
+ * default policy fails outright ("Failed to fetch"), no-referrer gets 200.
+ * transformers.js and kokoro-js both use the global fetch, so wrap it once.
+ */
+const realFetch = self.fetch.bind(self);
+self.fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
+	realFetch(input, { referrerPolicy: 'no-referrer', ...init })) as typeof fetch;
+
+/**
+ * ARM cores run Kokoro's int8 kernels 2.5-3x slower than fp32 (measured on
+ * Snapdragon X in Chrome and Node); x86 barely cares. So the automatic choice
+ * takes the 326MB fp32 model on ARM laptops/desktops, and the 92MB q8 model
+ * everywhere else. Phones keep q8: the download matters more there.
+ */
+async function prefersFp32(): Promise<boolean> {
+	const uaData = (
+		navigator as Navigator & {
+			userAgentData?: { mobile?: boolean; getHighEntropyValues?(h: string[]): Promise<{ architecture?: string }> };
+		}
+	).userAgentData;
+	if (uaData?.mobile) return false;
+	if (/iPhone|iPad|Android/.test(navigator.userAgent)) return false;
 	try {
-		const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
-		if (!gpu) return false;
-		return !!(await gpu.requestAdapter());
+		const arch = (await uaData?.getHighEntropyValues?.(['architecture']))?.architecture;
+		if (arch) return arch === 'arm';
 	} catch {
-		return false;
+		/* Safari has no UA-CH; fall through */
 	}
+	// Safari: every Mac sold since 2020 is Apple silicon.
+	return /Macintosh/.test(navigator.userAgent);
 }
 
 let loading: Promise<{ tts: KokoroTTS; device: string; dtype: Dtype }> | null = null;
@@ -34,7 +60,7 @@ let loading: Promise<{ tts: KokoroTTS; device: string; dtype: Dtype }> | null = 
  * WASM, and fp32 is what the WebGPU path expects. Pairing them in a single
  * setting stops anyone assembling a combination that produces noise.
  */
-function resolveMode(mode: string | undefined, canWebGPU: boolean): { device: Device; dtype: Dtype } {
+async function resolveMode(mode: string | undefined): Promise<{ device: Device; dtype: Dtype }> {
 	switch (mode) {
 		case 'webgpu-fp32':
 			return { device: 'webgpu', dtype: 'fp32' };
@@ -45,21 +71,33 @@ function resolveMode(mode: string | undefined, canWebGPU: boolean): { device: De
 		case 'wasm-fp32':
 			return { device: 'wasm', dtype: 'fp32' };
 		default:
-			// WASM by default even when WebGPU is available. On an Intel Xe-LPG
-			// adapter the WebGPU backend scored 0.407 back/front (reference 0.99)
-			// at fp32 and produced pure silence at q4f16, while both WASM paths
-			// were clean. There's no way to detect a bad adapter up front, so the
-			// automatic choice is the one that is correct everywhere.
-			return { device: 'wasm', dtype: 'q8' };
+			// WASM by default even when WebGPU is available. On Intel Xe-LPG the
+			// WebGPU backend drops the level mid-clip (gain 1.13 → 0.43 vs the CPU
+			// reference) with both the JSEP and native ORT WebGPU backends, and
+			// q4f16 comes out as NaN. There's no way to detect a bad adapter up
+			// front, so the automatic choice is the one that is correct everywhere.
+			return { device: 'wasm', dtype: (await prefersFp32()) ? 'fp32' : 'q8' };
 	}
+}
+
+/**
+ * onnxruntime-web caps itself at min(4, cores/2) threads. On a 22-core laptop
+ * that's RTF 2.8; ceil(cores/2) measured 1.56 and every core 1.81 (SMT
+ * contention), so half the cores it is. Only meaningful when cross-origin
+ * isolated — without SharedArrayBuffer ORT forces 1 anyway.
+ */
+function configureThreads(): number {
+	const cores = navigator.hardwareConcurrency || 4;
+	const wanted = self.crossOriginIsolated ? Math.max(1, Math.ceil(cores / 2)) : 1;
+	const wasm = (env.backends.onnx as { wasm?: { numThreads?: number } } | undefined)?.wasm;
+	if (wasm) wasm.numThreads = wanted;
+	return wanted;
 }
 
 function load(mode?: string) {
 	loading ??= (async () => {
-		// Asking for the adapter is the real test — navigator.gpu exists on plenty
-		// of mobile browsers that then refuse to hand one over.
-		const { device, dtype } = resolveMode(mode, await hasWebGPU());
-		const threads = self.crossOriginIsolated ? 'multi' : 'single';
+		const { device, dtype } = await resolveMode(mode);
+		const threads = configureThreads();
 
 		self.postMessage({ type: 'status', device, dtype, threads });
 
