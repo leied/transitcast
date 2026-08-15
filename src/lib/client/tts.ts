@@ -67,8 +67,12 @@ async function renderWithMeloTts(
 
 		if (res.ok) return res.arrayBuffer();
 
-		const detail = (await res.json().catch(() => ({}))) as { message?: string };
+		const detail = (await res.json().catch(() => ({}))) as {
+			message?: string;
+			upstream?: string;
+		};
 		const message = detail.message || `speech failed with ${res.status}`;
+		if (detail.upstream) console.warn(`tts upstream: ${detail.upstream}`);
 		// Out of allowance, or the engine is simply unavailable — every remaining
 		// chunk will fail the same way, so stop rather than grind through them.
 		if (res.status === 429) throw new FatalTtsError(message);
@@ -137,14 +141,36 @@ async function renderWithKokoro(
 	cfg: Config,
 	opts: RenderOptions
 ): Promise<RenderResult> {
-	opts.onProgress?.({ done: 0, total: chunks.length, engine: 'kokoro', loading: 'Loading voice model…' });
+	opts.onProgress?.({
+		done: 0,
+		total: chunks.length,
+		engine: 'kokoro',
+		loading: 'Downloading voice model…'
+	});
 
 	const { KokoroTTS } = await import('kokoro-js');
-	const hasWebGPU = 'gpu' in navigator;
-	const tts = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
-		dtype: hasWebGPU ? 'fp32' : 'q8',
-		device: hasWebGPU ? 'webgpu' : 'wasm'
-	});
+
+	// q8 is the 92MB `model_quantized.onnx`. The upstream README suggests fp32 on
+	// WebGPU, but that file is 326MB — not something to pull onto a phone that's
+	// about to get on a bus.
+	const load = (device: 'webgpu' | 'wasm') =>
+		KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', { dtype: 'q8', device });
+
+	let tts;
+	try {
+		tts = await load('gpu' in navigator ? 'webgpu' : 'wasm');
+	} catch (e) {
+		// WebGPU is refused on plenty of mobile browsers even when navigator.gpu
+		// exists, so fall back rather than giving up.
+		try {
+			tts = await load('wasm');
+		} catch (inner) {
+			const detail = inner instanceof Error ? inner.message : String(inner);
+			throw new Error(
+				`Couldn't load the Kokoro voice model (${detail}). It downloads about 92MB from huggingface.co on first use — check that the network isn't blocking it, then try again.`
+			);
+		}
+	}
 
 	const pcm: Float32Array[] = [];
 	let rate = 24000;

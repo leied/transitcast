@@ -57,12 +57,14 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		} catch (err) {
 			lastError = err instanceof Error ? err.message : 'Workers AI call failed';
 
-			// The daily neuron allowance running out is permanent until 00:00 UTC;
-			// don't burn retries on it.
-			if (/3036|neuron|quota|allocation|exceed/i.test(lastError)) {
+			// Only code 3036 actually means the free allocation is gone. Matching on
+			// words like "limit" or "exceed" reported a used-up allowance while the
+			// dashboard read 0/10k neurons — capacity errors say "exceeded" too.
+			if (/\b3036\b/.test(lastError)) {
 				throw error(429, {
 					message:
-						'Workers AI daily free allowance is used up (10,000 neurons ≈ 9 hours of speech). It resets at 00:00 UTC. Switch the engine to Kokoro in Settings to keep going — it renders on your device for free.'
+						'Workers AI daily free allowance is used up (10,000 neurons ≈ 9 hours of speech). It resets at 00:00 UTC. Switch the engine to Kokoro in Settings to keep going — it renders on your device for free.',
+					upstream: lastError
 				} as App.Error);
 			}
 
@@ -77,11 +79,12 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	}
 
 	if (lastError) {
-		const upstream = /3043|3040|internal server/i.test(lastError);
+		// Always carry the raw upstream text through. Guessing at what a Workers AI
+		// error meant is how the allowance message ended up lying.
+		console.error(`melotts failed: ${lastError}`);
 		throw error(502, {
-			message: upstream
-				? `Workers AI failed three times on this chunk (${lastError.slice(0, 80)}). This model has had recurring upstream errors; if it keeps up, switch the engine to Kokoro in Settings.`
-				: lastError
+			message: `Workers AI could not speak this chunk after three tries: ${lastError.slice(0, 160)}`,
+			upstream: lastError
 		} as App.Error);
 	}
 

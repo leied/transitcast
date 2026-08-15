@@ -63,7 +63,10 @@ for (const [name, text] of CASES) {
 		} else {
 			failed++;
 			const detail = await res.json().catch(() => ({}));
-			line = `\x1b[31mFAIL\x1b[0m ${name.padEnd(13)} ${String(text.length).padStart(4)} chars → ${res.status}  ${String(detail.message ?? '').slice(0, 100)}`;
+			// The verbatim upstream text is the useful part — Workers AI error codes
+			// are what distinguish "out of allowance" from "upstream had a moment".
+			const raw = detail.upstream ?? detail.message ?? '';
+			line = `\x1b[31mFAIL\x1b[0m ${name.padEnd(13)} ${String(text.length).padStart(4)} chars → ${res.status}  ${String(raw).slice(0, 120)}`;
 		}
 	} catch (e) {
 		failed++;

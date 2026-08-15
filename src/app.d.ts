@@ -6,6 +6,8 @@ declare global {
 			message: string;
 			/** Seconds the client should wait before retrying, from the LLM's 429. */
 			retryAfter?: number;
+			/** Verbatim upstream error text, so failures stay diagnosable. */
+			upstream?: string;
 		}
 		// interface Locals {}
 		// interface PageData {}
