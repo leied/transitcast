@@ -17,6 +17,7 @@
 	let error = $state('');
 	let progress = $state(0);
 	let skippedChunks = $state(0);
+	let skippedReason = $state('');
 
 	let player = $state<HTMLAudioElement | null>(null);
 	let playing = $state(false);
@@ -115,12 +116,13 @@
 				progress = p.total ? p.done / p.total : 0;
 			};
 
-			const { blob, skipped } = await renderBrief(brief, config, {
+			const { blob, skipped, reason } = await renderBrief(brief, config, {
 				onProgress,
 				signal: controller.signal
 			});
 
 			skippedChunks = skipped;
+			skippedReason = reason ?? '';
 
 			await audioStore.put({
 				id: brief.id,
@@ -260,13 +262,16 @@
 
 		{#if skippedChunks > 0}
 			<div class="card warn">
-				<span class="small"
-					>{skippedChunks} passage{skippedChunks === 1 ? '' : 's'} couldn't be spoken and {skippedChunks ===
+				<span class="small">
+					{skippedChunks} passage{skippedChunks === 1 ? '' : 's'} couldn't be spoken and {skippedChunks ===
 					1
 						? 'was'
-						: 'were'} left out. Workers AI has recurring upstream errors on this model — switching the
-					engine to Kokoro in Settings renders on your device instead.</span
-				>
+						: 'were'} left out. Switching the engine to Kokoro in Settings renders on your device
+					instead.
+				</span>
+				{#if skippedReason}
+					<pre class="tiny reason">{skippedReason}</pre>
+				{/if}
 			</div>
 		{/if}
 
@@ -407,6 +412,17 @@
 		margin: 0.6rem 0 0;
 		padding-left: 1.1rem;
 		color: var(--muted);
+	}
+
+	.reason {
+		margin: 0.6rem 0 0;
+		padding: 0.5rem 0.6rem;
+		background: var(--bg);
+		border-radius: var(--radius-sm);
+		color: var(--muted);
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 	}
 
 	.bar {

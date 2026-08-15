@@ -22,6 +22,8 @@ export type RenderResult = {
 	blob: Blob;
 	/** Chunks that never rendered. The audio is still playable without them. */
 	skipped: number;
+	/** Why they were dropped, for the UI to show rather than bury in the console. */
+	reason?: string;
 };
 
 function plan(brief: Brief): string[] {
@@ -56,6 +58,9 @@ async function renderWithMeloTts(
 	let done = 0;
 	let next = 0;
 	let skipped = 0;
+	/** Why chunks were abandoned, most frequent first. Without this the failure
+	 *  message says only "every chunk failed" and the cause dies in the console. */
+	const reasons = new Map<string, number>();
 
 	async function speak(text: string): Promise<ArrayBuffer> {
 		const res = await fetch('/api/tts', {
@@ -71,8 +76,8 @@ async function renderWithMeloTts(
 			message?: string;
 			upstream?: string;
 		};
-		const message = detail.message || `speech failed with ${res.status}`;
-		if (detail.upstream) console.warn(`tts upstream: ${detail.upstream}`);
+		// Prefer the verbatim upstream text; it carries the Workers AI error code.
+		const message = detail.upstream || detail.message || `speech failed with ${res.status}`;
 		// Out of allowance, or the engine is simply unavailable — every remaining
 		// chunk will fail the same way, so stop rather than grind through them.
 		if (res.status === 429) throw new FatalTtsError(message);
@@ -104,9 +109,18 @@ async function renderWithMeloTts(
 			}
 
 			skipped++;
+			const reason = (e instanceof Error ? e.message : String(e)).slice(0, 200);
+			reasons.set(reason, (reasons.get(reason) ?? 0) + 1);
 			return [];
 		}
 	}
+
+	const summariseReasons = () =>
+		[...reasons.entries()]
+			.sort((a, b) => b[1] - a[1])
+			.slice(0, 2)
+			.map(([reason, n]) => (n > 1 ? `${reason} (×${n})` : reason))
+			.join('; ');
 
 	const worker = async () => {
 		for (;;) {
@@ -124,12 +138,13 @@ async function renderWithMeloTts(
 	const flat = parts.flat().filter(Boolean);
 	if (flat.length === 0) {
 		throw new Error(
-			'Every chunk failed to render. Workers AI MeloTTS has recurring upstream errors — switch the engine to Kokoro in Settings to render on your device instead.'
+			`All ${chunks.length} chunks failed. Workers AI said: ${summariseReasons() || 'no reason given'}. ` +
+				'If this persists, switch the engine to Kokoro in Settings to render on your device instead.'
 		);
 	}
 
 	// Concatenated MP3 frames play back as one stream in every browser engine.
-	return { blob: new Blob(flat, { type: 'audio/mpeg' }), skipped };
+	return { blob: new Blob(flat, { type: 'audio/mpeg' }), skipped, reason: summariseReasons() };
 }
 
 /**
@@ -175,6 +190,7 @@ async function renderWithKokoro(
 	const pcm: Float32Array[] = [];
 	let rate = 24000;
 	let skipped = 0;
+	let reason = '';
 
 	for (const [i, chunk] of chunks.entries()) {
 		if (opts.signal?.aborted) throw new Error('cancelled');
@@ -182,15 +198,19 @@ async function renderWithKokoro(
 			const audio = await tts.generate(chunk, { voice: cfg.tts.kokoroVoice as never });
 			pcm.push(audio.audio as Float32Array);
 			rate = audio.sampling_rate;
-		} catch {
-			// One unpronounceable fragment shouldn't cost the whole brief.
+		} catch (e) {
+			// One unpronounceable fragment shouldn't cost the whole brief, but the
+			// reason still has to reach the surface.
 			skipped++;
+			reason = (e instanceof Error ? e.message : String(e)).slice(0, 200);
 		}
 		opts.onProgress?.({ done: i + 1, total: chunks.length, engine: 'kokoro', skipped });
 	}
 
-	if (pcm.length === 0) throw new Error('Kokoro produced no audio');
-	return { blob: encodeWav(pcm, rate), skipped };
+	if (pcm.length === 0) {
+		throw new Error(`Kokoro produced no audio. Last error: ${reason || 'none reported'}`);
+	}
+	return { blob: encodeWav(pcm, rate), skipped, reason };
 }
 
 /**
