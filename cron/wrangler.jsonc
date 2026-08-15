@@ -19,7 +19,10 @@
 	},
 
 	"vars": {
-		"APP_ORIGIN": "https://transitcast.workers.dev"
+		"APP_ORIGIN": "https://transitcast.workers.dev",
+		// Accounts with no app open (no GET /api/config) in this many days have
+		// their KV data deleted automatically.
+		"INACTIVE_DAYS": "90"
 	},
 
 	"observability": {

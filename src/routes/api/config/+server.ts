@@ -1,11 +1,16 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { env, uid } from '$lib/server/ctx';
-import { getConfig, putConfig } from '$lib/server/store';
+import { getConfig, putConfig, touchActivity } from '$lib/server/store';
 import type { Config } from '$lib/types';
 
 export const GET: RequestHandler = async ({ request, platform }) => {
-	return json(await getConfig(env(platform), uid(request)));
+	const e = env(platform);
+	const id = uid(request);
+	// Fired on every app load, so it doubles as the "still in use" signal the
+	// cron sweep checks before deleting an abandoned account's data.
+	platform!.context.waitUntil(touchActivity(e, id));
+	return json(await getConfig(e, id));
 };
 
 export const PUT: RequestHandler = async ({ request, platform }) => {

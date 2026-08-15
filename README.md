@@ -183,3 +183,9 @@ items and aggregators re-post the same story:
 - No accounts yet. Settings live under a random id in `localStorage`, shareable as
   a link. Everything is already keyed by that id, so real auth can be added without
   moving any stored data.
+- Abandoned ids get cleaned up automatically. The scheduler stamps a "last
+  opened the app" day on every config it sees and, once a day's worth of runs
+  have passed, deletes the config/brief/dedupe KV entries for any id that's
+  gone `INACTIVE_DAYS` (default 90, set in `cron/wrangler.jsonc`) without a
+  visit. Enabling auto-build doesn't count as a visit, so a forgotten schedule
+  can't keep an abandoned id alive forever.

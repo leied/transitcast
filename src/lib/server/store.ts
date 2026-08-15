@@ -33,13 +33,38 @@ export async function getConfig(env: Env, uid: string): Promise<Config> {
 	};
 }
 
-export type ConfigMeta = { e: boolean; h: number };
+export type ConfigMeta = { e: boolean; h: number; a: number };
+
+/** Days since the Unix epoch, UTC. Used as a coarse "last active" stamp. */
+function today(): number {
+	return Math.floor(Date.now() / 86400_000);
+}
 
 export async function putConfig(env: Env, uid: string, cfg: Config): Promise<void> {
 	// The schedule is mirrored into KV key metadata so the cron can find due
-	// users from a single `list` call instead of reading every config.
-	const metadata: ConfigMeta = { e: cfg.schedule.enabled, h: cfg.schedule.hourUTC };
+	// users from a single `list` call instead of reading every config. `a` is
+	// the last-active day, which the same list call uses to find abandoned
+	// accounts to delete — see cron/worker.js.
+	const metadata: ConfigMeta = { e: cfg.schedule.enabled, h: cfg.schedule.hourUTC, a: today() };
 	await env.TC_KV.put(key.config(uid), JSON.stringify(cfg), { metadata });
+}
+
+/**
+ * Stamps today's date as this uid's last-active day, at most once/day so an
+ * open app doesn't spend the KV write quota. Only real app opens should count
+ * (GET /api/config, fired on every page load) — not the scheduled cron build,
+ * which would otherwise keep a config "active" forever even if no one is
+ * looking at it anymore.
+ */
+export async function touchActivity(env: Env, uid: string): Promise<void> {
+	const { value, metadata } = await env.TC_KV.getWithMetadata<ConfigMeta>(key.config(uid), 'text');
+	if (value === null) return;
+	const meta = metadata ?? ({} as Partial<ConfigMeta>);
+	const day = today();
+	if (meta.a === day) return;
+	await env.TC_KV.put(key.config(uid), value, {
+		metadata: { e: meta.e ?? false, h: meta.h ?? 0, a: day } satisfies ConfigMeta
+	});
 }
 
 export async function getBrief(env: Env, uid: string): Promise<Brief | null> {
