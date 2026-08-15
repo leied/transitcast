@@ -118,6 +118,9 @@ export function defaultConfig(): Config {
 			kokoroVoice: 'af_heart',
 			kokoroMode: '',
 			auraSpeaker: 'asteria',
+			openrouterModel: 'deepgram/flux-tts:free',
+			openrouterVoice: 'flux-brooke-en',
+			geminiVoice: 'Kore',
 			rate: 1
 		},
 		schedule: { enabled: false, hourUTC: 13 }

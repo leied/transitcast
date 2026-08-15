@@ -10,8 +10,21 @@
 		voicesIn,
 		voiceLabel,
 		previewVoice,
-		kokoroStatus
+		kokoroStatus,
+		SAMPLE_TEXT
 	} from '$lib/client/kokoro';
+	import { previewServerVoice, engineLabel } from '$lib/client/tts';
+	import {
+		CHUNK_CHARS,
+		OPENROUTER_MODELS,
+		OPENROUTER_FREE_RPD,
+		GEMINI_FREE_RPD,
+		GEMINI_FREE_RPM,
+		FLUX_VOICES,
+		fluxVoiceLabel,
+		GEMINI_VOICES,
+		openrouterModel
+	} from '$lib/engines';
 
 	const AURA_SPEAKERS = [
 		{ id: 'asteria', name: 'Asteria', gender: 'F' },
@@ -65,8 +78,43 @@
 		}
 	}
 
+	/**
+	 * Same idea for the server engines: one short request against whatever the
+	 * engine's allowance is, so a voice can be judged before spending a brief on it.
+	 */
+	let serverPreviewing = $state(false);
+	let serverPreviewUrl = $state('');
+	let serverPreviewError = $state('');
+	async function previewServer() {
+		if (!config || serverPreviewing) return;
+		serverPreviewing = true;
+		serverPreviewError = '';
+		try {
+			const blob = await previewServerVoice(config, SAMPLE_TEXT);
+			if (serverPreviewUrl) URL.revokeObjectURL(serverPreviewUrl);
+			serverPreviewUrl = URL.createObjectURL(blob);
+			queueMicrotask(() =>
+				document.querySelector<HTMLAudioElement>('audio.server-preview')?.play()
+			);
+		} catch (e) {
+			serverPreviewError = e instanceof Error ? e.message : String(e);
+		} finally {
+			serverPreviewing = false;
+		}
+	}
+
+	/** The voice field means something different per OpenRouter model, so a model change resets it. */
+	function onOpenrouterModelChange() {
+		if (!config) return;
+		const m = openrouterModel(config.tts.openrouterModel);
+		if (m) config.tts.openrouterVoice = m.defaultVoice;
+		touch();
+	}
+	const orModel = $derived(config ? openrouterModel(config.tts.openrouterModel) : undefined);
+
 	onDestroy(() => {
 		if (previewUrl) URL.revokeObjectURL(previewUrl);
+		if (serverPreviewUrl) URL.revokeObjectURL(serverPreviewUrl);
 	});
 
 	onMount(async () => {
@@ -119,6 +167,29 @@
 	);
 	const dailyShare = $derived(Math.min(100, Math.round((neurons / FREE_NEURONS) * 100)));
 	const briefsPerDay = $derived(neurons > 0 ? Math.floor(FREE_NEURONS / neurons) : Infinity);
+
+	// The key-based cloud engines are metered in requests, not neurons: a brief
+	// costs ceil(chars / chunk) of them, so show that against the daily cap.
+	const requestsPerBrief = $derived(
+		config?.tts.engine === 'openrouter'
+			? Math.ceil(totalChars / CHUNK_CHARS.openrouter)
+			: config?.tts.engine === 'gemini'
+				? Math.ceil(totalChars / CHUNK_CHARS.gemini)
+				: 0
+	);
+	const requestCap = $derived(
+		config?.tts.engine === 'openrouter'
+			? OPENROUTER_FREE_RPD
+			: config?.tts.engine === 'gemini'
+				? GEMINI_FREE_RPD
+				: 0
+	);
+	const requestShare = $derived(
+		requestCap ? Math.min(100, Math.round((requestsPerBrief / requestCap) * 100)) : 0
+	);
+	const paidPerBrief = $derived(
+		config?.tts.engine === 'openrouter' && orModel?.perChar ? totalChars * orModel.perChar : 0
+	);
 
 	// ── Schedule time zone juggling ────────────────────────────────────────────
 	function tzOffsetHours(tz: string): number {
@@ -459,6 +530,8 @@
 					<select id="engine" bind:value={config.tts.engine} onchange={touch}>
 						<option value="aura">Deepgram Aura — best voice, on the server, uses more allowance</option>
 						<option value="kokoro">Kokoro — free and offline, 92MB download, runs on device</option>
+						<option value="openrouter">OpenRouter — free cloud voices (Deepgram Flux, Fish Audio), needs a key</option>
+						<option value="gemini">Gemini TTS — Google's voices, free tier, a few briefs a day, needs a key</option>
 						<option value="melotts">MeloTTS — cheapest, but currently unreliable</option>
 					</select>
 					{#if config.tts.engine === 'melotts'}
@@ -478,6 +551,95 @@
 								<option value={s.id}>{s.name} ({s.gender})</option>
 							{/each}
 						</select>
+					</div>
+				{/if}
+
+				{#if config.tts.engine === 'openrouter'}
+					<div>
+						<label for="or-model">Model</label>
+						<select id="or-model" bind:value={config.tts.openrouterModel} onchange={onOpenrouterModelChange}>
+							{#each OPENROUTER_MODELS as m (m.id)}
+								<option value={m.id}>{m.name}</option>
+							{/each}
+						</select>
+						{#if orModel}
+							<p class="tiny muted" style="margin: 0.35rem 0 0">{orModel.note}</p>
+						{/if}
+
+						<div style="margin-top: 0.75rem">
+							<label for="or-voice">Voice</label>
+							{#if orModel?.voices === 'flux'}
+								<select id="or-voice" bind:value={config.tts.openrouterVoice} onchange={touch}>
+									{#each FLUX_VOICES as v (v)}
+										<option value={v}>{fluxVoiceLabel(v)}</option>
+									{/each}
+								</select>
+							{:else if orModel?.voices === 'kokoro'}
+								<select id="or-voice" bind:value={config.tts.openrouterVoice} onchange={touch}>
+									{#each VOICE_GROUPS as group (group)}
+										<optgroup label={group}>
+											{#each voicesIn(group) as v (v.id)}
+												<option value={v.id}>{voiceLabel(v)}</option>
+											{/each}
+										</optgroup>
+									{/each}
+								</select>
+							{:else}
+								<input
+									id="or-voice"
+									type="text"
+									bind:value={config.tts.openrouterVoice}
+									oninput={touch}
+									placeholder="fish.audio voice id (32 hex characters)"
+									spellcheck="false"
+								/>
+								<p class="tiny muted" style="margin: 0.35rem 0 0">
+									Any public voice on fish.audio works: open it and copy the id from the URL. The
+									default is the one OpenRouter uses for its own sample.
+								</p>
+							{/if}
+						</div>
+
+						<p class="tiny muted" style="margin: 0.5rem 0 0">
+							Runs on OpenRouter's servers, so the phone does nothing but play the result. The
+							server needs an <code>OPENROUTER_API_KEY</code> secret (openrouter.ai/keys, no card).
+							Free models are capped per account at 20 requests a minute and {OPENROUTER_FREE_RPD} a
+							day — 1,000 a day once the account has ever bought $10 of credit.
+						</p>
+					</div>
+				{/if}
+
+				{#if config.tts.engine === 'gemini'}
+					<div>
+						<label for="gem-voice">Gemini voice</label>
+						<select id="gem-voice" bind:value={config.tts.geminiVoice} onchange={touch}>
+							{#each GEMINI_VOICES as v (v.id)}
+								<option value={v.id}>{v.id} — {v.tone}</option>
+							{/each}
+						</select>
+						<p class="tiny muted" style="margin: 0.5rem 0 0">
+							Google's TTS models via AI Studio, read as one continuous piece in ~3-minute requests. The
+							server needs a <code>GEMINI_API_KEY</code> secret (aistudio.google.com/apikey, no card).
+							Free tier: {GEMINI_FREE_RPM} requests a minute and {GEMINI_FREE_RPD} a day, so a brief
+							takes a couple of minutes to render and there are only a few a day. It's a preview model:
+							it occasionally returns nothing for a passage, which is retried and then skipped.
+						</p>
+					</div>
+				{/if}
+
+				{#if config.tts.engine !== 'kokoro'}
+					<div>
+						<div class="row" style="flex-wrap: wrap">
+							<button onclick={previewServer} disabled={serverPreviewing}>
+								{serverPreviewing ? 'Rendering…' : `Preview with ${engineLabel(config.tts.engine)}`}
+							</button>
+							{#if serverPreviewUrl}
+								<audio class="server-preview" controls src={serverPreviewUrl} style="max-width: 100%"></audio>
+							{/if}
+						</div>
+						{#if serverPreviewError}
+							<p class="tiny" style="color: var(--bad); margin: 0.4rem 0 0">{serverPreviewError}</p>
+						{/if}
 					</div>
 				{/if}
 
@@ -539,7 +701,7 @@
 							preview downloads about 92MB, then it's cached.
 						</p>
 					</div>
-				{:else}
+				{:else if config.tts.engine === 'melotts'}
 					<div>
 						<label for="lang">Language</label>
 						<select id="lang" bind:value={config.tts.lang} onchange={touch}>
@@ -562,6 +724,28 @@
 						<p class="tiny muted" style="margin: 0.4rem 0 0">
 							Kokoro renders on your device, so this costs nothing at all and works offline.
 						</p>
+					{:else if requestCap}
+						{#if paidPerBrief}
+							<p class="tiny muted" style="margin: 0.4rem 0 0">
+								About {requestsPerBrief} request{requestsPerBrief === 1 ? '' : 's'} per brief on a paid
+								model: roughly ${paidPerBrief < 0.01 ? paidPerBrief.toFixed(4) : paidPerBrief.toFixed(3)}
+								of OpenRouter credit each. No daily cap on paid models.
+							</p>
+						{:else}
+							<div class="bar">
+								<div class="fill" class:hot={requestShare > 60} style:width="{requestShare}%"></div>
+							</div>
+							<p class="tiny muted" style="margin: 0.4rem 0 0">
+								About {requestsPerBrief} of the {requestCap} free {engineLabel(config.tts.engine)} requests
+								per day ({requestShare}%) — roughly
+								{Math.max(1, Math.floor(requestCap / Math.max(1, requestsPerBrief)))} brief{Math.floor(
+									requestCap / Math.max(1, requestsPerBrief)
+								) === 1
+									? ''
+									: 's'} a day for everyone sharing the key. Running out fails the render rather than
+								charging anyone.
+							</p>
+						{/if}
 					{:else}
 						<div class="bar">
 							<div class="fill" class:hot={dailyShare > 60} style:width="{dailyShare}%"></div>

@@ -21,6 +21,12 @@ declare global {
 				LLM_API_KEY: string;
 				PUBLIC_ORIGIN: string;
 				CRON_SECRET: string;
+				/** Optional: enables the OpenRouter speech engine (openrouter.ai/keys). */
+				OPENROUTER_API_KEY?: string;
+				/** Optional: enables the Gemini TTS engine (aistudio.google.com/apikey). */
+				GEMINI_API_KEY?: string;
+				/** Which Gemini TTS model to call; defaults to gemini-2.5-flash-preview-tts. */
+				GEMINI_TTS_MODEL?: string;
 			};
 			context: { waitUntil(promise: Promise<unknown>): void };
 			caches: CacheStorage;

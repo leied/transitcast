@@ -49,19 +49,26 @@ whatever `main` points at, so the app's Worker can't also carry a hand-written
 `scheduled` export. The scheduler lives in `cron/` as a separate ~90-line Worker
 sharing the same KV namespace.
 
-### Why MeloTTS
+### Speech engines
 
-| | free allowance | per 15-min brief | notes |
+| | free allowance | per 10-min brief | notes |
 |---|---|---|---|
-| **Workers AI MeloTTS** | 10,000 neurons/day | ~280 neurons | ~9 hours of speech a day, account-wide |
-| Groq Orpheus | 100 req/day, 200 chars/req | ~68 requests | ~22 min/day ceiling, prosody resets every sentence |
+| **Deepgram Aura** (Workers AI, default) | 10,000 neurons/day | ~12,000 neurons | best voice, but that's about one brief a day, account-wide |
+| Workers AI MeloTTS | 10,000 neurons/day | ~190 neurons | ~9 hours a day; returns error 3043 a lot |
+| **OpenRouter** free models | 50 requests/day (1,000 once $10 ever bought) | 6 requests | Deepgram Flux or Fish Audio, needs `OPENROUTER_API_KEY` |
+| **Gemini TTS** (AI Studio) | 15 requests/day, 3/min | 3 requests | Google's voices, ~3-minute chunks, needs `GEMINI_API_KEY` |
 | Kokoro-82M (on device) | unlimited | free | 92MB download, renders on the phone |
 
-MeloTTS is the default because it costs a rounding error against the daily
-allowance and needs nothing downloaded. Going over the allowance **fails the
-request rather than charging you** — there's no card on the account and no way to
-run up a bill. Kokoro is available in Settings as an opt-in upgrade: better voice,
-zero cost, at the price of a one-time 92MB model download and a slower render.
+Every one of these **fails the request rather than charging you** — there's no
+card on any of the accounts and no way to run up a bill. Overage messages say
+which allowance ran out and when it resets. Kokoro is the fallback that depends
+on nothing upstream, at the price of a one-time model download and a render that
+is slow on phones.
+
+The OpenRouter and Gemini engines are metered in requests, so the client joins
+the brief into the biggest chunks each upstream allows (1,500 and 3,000
+characters) rather than one request per paragraph. Gemini answers with raw PCM,
+which the client wraps in a WAV; everything else is MP3.
 
 The LLM deliberately runs on Groq's separate free tier rather than Workers AI,
 because the LLM is what would actually eat neurons (~2,400 per brief on a 70B
@@ -109,6 +116,9 @@ pnpm wrangler kv namespace create TC_KV
 pnpm wrangler secret put LLM_API_KEY                         # Groq API key
 pnpm wrangler secret put CRON_SECRET
 pnpm wrangler secret put CRON_SECRET -c cron/wrangler.jsonc
+# Optional speech engines — free, no card, but each needs its own key:
+pnpm wrangler secret put OPENROUTER_API_KEY                  # openrouter.ai/keys
+pnpm wrangler secret put GEMINI_API_KEY                      # aistudio.google.com/apikey
 
 # 3. Deploy both Workers
 pnpm deploy

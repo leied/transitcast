@@ -36,6 +36,11 @@
 		"LLM_BASE_URL": "https://api.groq.com/openai/v1",
 		"LLM_MODEL": "openai/gpt-oss-120b",
 
+		// Gemini TTS model for the optional Gemini engine (needs the GEMINI_API_KEY
+		// secret). 2.5 Flash TTS is the one with a documented free tier; swap in
+		// gemini-3.1-flash-tts-preview to try the newer model.
+		"GEMINI_TTS_MODEL": "gemini-2.5-flash-preview-tts",
+
 		// Origin the cron Worker calls back into. Must match cron's APP_ORIGIN.
 		"PUBLIC_ORIGIN": "https://transitcast.workers.dev"
 	},

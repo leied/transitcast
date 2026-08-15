@@ -34,7 +34,7 @@ export type Config = {
 	feeds: Feed[];
 	sections: Section[];
 	tts: {
-		engine: 'melotts' | 'aura' | 'kokoro';
+		engine: 'melotts' | 'aura' | 'kokoro' | 'openrouter' | 'gemini';
 		/** MeloTTS language code. */
 		lang: string;
 		/** Kokoro voice id, used only when engine === 'kokoro'. */
@@ -44,6 +44,12 @@ export type Config = {
 		kokoroMode: '' | 'webgpu-fp32' | 'webgpu-q4f16' | 'wasm-q8' | 'wasm-fp32';
 		/** Deepgram Aura speaker, used only when engine === 'aura'. */
 		auraSpeaker: string;
+		/** OpenRouter TTS model id, e.g. 'deepgram/flux-tts:free'. */
+		openrouterModel: string;
+		/** Voice for that model — a Flux voice id, a fish.audio voice id, or a Kokoro voice. */
+		openrouterVoice: string;
+		/** Gemini TTS prebuilt voice name, e.g. 'Kore'. */
+		geminiVoice: string;
 		/** Playback rate baked into nothing — just remembered for the player. */
 		rate: number;
 	};

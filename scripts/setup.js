@@ -178,6 +178,20 @@ async function main() {
 	wrangler(['secret', 'put', 'LLM_API_KEY'], { input: `${llmKey}\n` });
 	note('LLM_API_KEY set on the app');
 
+	// Optional speech engines. Both are free (no card) but need a key; skipping
+	// them just leaves those engines greyed out with a message saying which
+	// secret to set. Env vars keep the unattended path unattended.
+	const optionalKeys = [
+		['OPENROUTER_API_KEY', 'OpenRouter API key for free cloud voices (openrouter.ai/keys), Enter to skip: '],
+		['GEMINI_API_KEY', 'Gemini API key for Google TTS (aistudio.google.com/apikey), Enter to skip: ']
+	];
+	for (const [name, prompt] of optionalKeys) {
+		const value = process.env[name]?.trim() || (await ask(`    ${prompt}`, { secret: true }));
+		if (!value) continue;
+		wrangler(['secret', 'put', name], { input: `${value}\n` });
+		note(`${name} set on the app`);
+	}
+
 	const cronSecret = randomUUID();
 	wrangler(['secret', 'put', 'CRON_SECRET'], { input: `${cronSecret}\n` });
 	wrangler(['secret', 'put', 'CRON_SECRET', '-c', CRON_CONFIG], { input: `${cronSecret}\n` });
