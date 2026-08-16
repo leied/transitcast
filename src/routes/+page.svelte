@@ -413,6 +413,17 @@
 		min-width: 0;
 	}
 
+	/* The headline wins the first line and the section chip drops below it when
+	   they don't both fit; sharing one line shaved "Tech & Security" down to
+	   "Tech & Se…" on every phone width. */
+	.seg > .row {
+		flex-wrap: wrap;
+	}
+
+	.seg > .row .chip {
+		margin-left: auto;
+	}
+
 	.error {
 		border-color: #4a2a2e;
 		background: #21161a;
@@ -421,6 +432,17 @@
 		align-items: center;
 		gap: 1rem;
 		margin-bottom: 0.85rem;
+	}
+
+	/* The message takes the slack; Dismiss keeps its label rather than being
+	   squeezed into a vertical stack of letters. */
+	.error > .stack {
+		min-width: 0;
+		flex: 1 1 auto;
+	}
+
+	.error > button {
+		flex: 0 0 auto;
 	}
 
 	.warn {

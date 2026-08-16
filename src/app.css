@@ -129,7 +129,8 @@ button:focus-visible {
 
 textarea {
 	resize: vertical;
-	min-height: 4.5rem;
+	/* Three whole lines rather than two and a sliced one. */
+	min-height: 5.75rem;
 	line-height: 1.5;
 }
 
@@ -163,6 +164,22 @@ label {
 	min-width: 0;
 }
 
+/* A form control's intrinsic width is its floor unless this says otherwise, so
+   without it the control keeps its size and the buttons beside it get crushed
+   until their labels stack one letter per line. */
+.row > input,
+.row > select,
+.row > textarea {
+	min-width: 0;
+}
+
+/* Chips are meant to shrink and ellipsise; every other button should keep the
+   width its label needs and let the flexible thing next to it give way. */
+.row > button:not(.chip),
+.row > a:not(.chip) {
+	flex: 0 0 auto;
+}
+
 .muted {
 	color: var(--muted);
 }
@@ -177,6 +194,11 @@ label {
 
 .stack {
 	display: grid;
+	/* `minmax(0, 1fr)` rather than the implicit `auto`: an auto track is floored
+	   at the widest child's min-content width, so one long feed URL made the
+	   whole column — and with it every card, heading and paragraph in the
+	   section — wider than a 360px phone. */
+	grid-template-columns: minmax(0, 1fr);
 	gap: 0.75rem;
 }
 
@@ -184,7 +206,9 @@ label {
 	display: inline-flex;
 	align-items: center;
 	gap: 0.3rem;
-	padding: 0.15rem 0.5rem;
+	/* Roomy enough to be a thumb target: the section pickers are chips, and at
+	   the old 0.15rem they came out 25px tall. */
+	padding: 0.3rem 0.6rem;
 	border-radius: 999px;
 	border: 1px solid var(--border);
 	background: var(--surface-2);

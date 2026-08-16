@@ -355,7 +355,7 @@
 								bind:value={config.windowHours}
 								oninput={touch}
 							/>
-							<span class="muted small">hours</span>
+							<span class="muted small unit">hours</span>
 						</div>
 					</div>
 				</div>
@@ -374,15 +374,15 @@
 
 			{#each config.sections as section, i (section.id)}
 				<div class="card stack" class:off={!section.enabled}>
-					<div class="row" style="justify-content: space-between; gap: 0.5rem">
+					<div class="row section-head" style="justify-content: space-between; gap: 0.5rem">
 						<input
 							type="text"
+							class="section-title"
 							bind:value={section.title}
 							oninput={touch}
-							style="font-weight: 600; max-width: 18rem"
 							aria-label="Section title"
 						/>
-						<div class="row">
+						<div class="row controls">
 							<button class="ghost tiny" onclick={() => moveSection(i, -1)} disabled={i === 0}
 								>↑</button
 							>
@@ -473,11 +473,11 @@
 					{#each feeds as feed (feed.id)}
 						<div class="card feed" class:off={!feed.enabled}>
 							<div class="row" style="justify-content: space-between; gap: 0.6rem">
-								<label class="inline" style="margin: 0; font-size: 1rem; color: var(--text)">
+								<label class="inline name" style="margin: 0; font-size: 1rem; color: var(--text)">
 									<input type="checkbox" bind:checked={feed.enabled} onchange={touch} />
 									<strong>{feed.name}</strong>
 								</label>
-								<div class="row">
+								<div class="row controls">
 									<button class="ghost tiny" onclick={() => testFeed(feed)}>Test</button>
 									<button class="ghost tiny danger" onclick={() => removeFeed(feed.id)}>×</button>
 								</div>
@@ -833,13 +833,32 @@
 
 	.grid-2 {
 		display: grid;
-		grid-template-columns: 1fr 1fr;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 		gap: 0.75rem;
+	}
+
+	/* On a phone the title and its buttons don't fit on one line, so let them
+	   wrap instead of squeezing "Delete" into a one-letter-per-line column. */
+	.section-head {
+		flex-wrap: wrap;
+	}
+
+	.section-title {
+		flex: 1 1 12rem;
+		min-width: 0;
+		max-width: 18rem;
+		font-weight: 600;
 	}
 
 	@media (max-width: 520px) {
 		.grid-2 {
-			grid-template-columns: 1fr;
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		/* Below this the buttons always wrap onto their own line, so the title
+		   may as well have the whole line it now sits on. */
+		.section-title {
+			max-width: none;
 		}
 	}
 
@@ -848,14 +867,40 @@
 		align-items: center;
 		gap: 0.45rem;
 		margin: 0;
+		/* The whole label toggles the box, so give it a thumb's worth of height. */
+		min-height: 2.25rem;
 		font-size: 0.9rem;
 		color: var(--text);
 	}
 
 	label.inline input[type='checkbox'] {
-		width: 1.05rem;
-		height: 1.05rem;
+		width: 1.25rem;
+		height: 1.25rem;
+		flex: 0 0 auto;
 		accent-color: var(--accent);
+	}
+
+	/* A feed's name takes what's left after its buttons, and breaks rather than
+	   pushing them off the screen. */
+	label.inline.name {
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+
+	.controls {
+		flex: 0 0 auto;
+		margin-left: auto;
+	}
+
+	/* Same idea as the section header: a long publisher name takes the line and
+	   the buttons drop underneath rather than shaving the name to a column. */
+	.feed > .row {
+		flex-wrap: wrap;
+	}
+
+	.unit {
+		flex: 0 0 auto;
+		white-space: nowrap;
 	}
 
 	.off {
